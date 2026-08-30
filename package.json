@@ -1,7 +1,7 @@
 {
   "name": "oktz-baileys",
   "type": "module",
-  "version": "9.0.25",
+  "version": "9.0.26",
   "description": "Fork ourin-baileys — curve-native adaptor (XEdDSA Rust + node:crypto) di lib, tanpa override consumer",
   "license": "MIT",
   "main": "lib/index.js",
