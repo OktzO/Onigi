@@ -11,7 +11,7 @@
 // curve25519-js; tidak dipakai libsignal).
 'use strict';
 
-const { generateKeyPairSync, diffieHellman } = require('crypto');
+const { generateKeyPairSync, diffieHellman, createPrivateKey, createPublicKey } = require('crypto');
 
 const native = require('./curve25519.linux-x64-gnu.node');
 
@@ -50,19 +50,17 @@ function generateKeyPair(seed) {
 function sharedKey(secretKey, publicKey) {
   checkLen(publicKey, 32, 'public key');
   checkLen(secretKey, 32, 'secret key');
-  const priv = diffieHellman({
-    privateKey: {
-      key: Buffer.concat([PRIVATE_KEY_DER_PREFIX, secretKey]),
-      format: 'der',
-      type: 'pkcs8',
-    },
-    publicKey: {
-      key: Buffer.concat([PUBLIC_KEY_DER_PREFIX, publicKey]),
-      format: 'der',
-      type: 'spki',
-    },
+  const priv = createPrivateKey({
+    key: Buffer.concat([PRIVATE_KEY_DER_PREFIX, secretKey]),
+    format: 'der',
+    type: 'pkcs8',
   });
-  return new Uint8Array(priv);
+  const pub = createPublicKey({
+    key: Buffer.concat([PUBLIC_KEY_DER_PREFIX, publicKey]),
+    format: 'der',
+    type: 'spki',
+  });
+  return new Uint8Array(diffieHellman({ privateKey: priv, publicKey: pub }));
 }
 
 /** XEdDSA sign (native Rust). Mengembalikan signature 64 byte. */

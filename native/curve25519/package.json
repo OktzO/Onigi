@@ -1,6 +1,6 @@
 {
-  "name": "curve25519-js",
-  "version": "0.0.4-native.1",
+  "name": "oktz-curve25519",
+  "version": "1.0.0",
   "description": "curve25519-js replacement — XEdDSA sign/verify native Rust, X25519 node:crypto",
   "main": "index.cjs",
   "license": "MIT",

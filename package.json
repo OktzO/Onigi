@@ -1,20 +1,14 @@
 {
-  "name": "@oktzo/oktz-baileys",
+  "name": "oktz-baileys",
   "type": "module",
-  "version": "9.0.22",
+  "version": "9.0.23",
   "description": "Fork ourin-baileys — XEdDSA curve25519 native (Rust) sign/verify",
   "license": "MIT",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
-  "publishConfig": {
-    "registry": "https://npm.pkg.github.com"
-  },
   "files": [
     "lib/**/*",
-    "WAProto/**/*",
-    "native/curve25519/index.cjs",
-    "native/curve25519/package.json",
-    "native/curve25519/curve25519.linux-x64-gnu.node"
+    "WAProto/**/*"
   ],
   "scripts": {
     "build": "node -e \"const{execSync:e}=require('child_process');try{e('npx tsc -P tsconfig.build.json',{stdio:'inherit'})}catch(x){};e('npx tsc-esm-fix --tsconfig=tsconfig.build.json --ext=.js',{stdio:'inherit'})\""
