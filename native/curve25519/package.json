@@ -1,0 +1,14 @@
+{
+  "name": "curve25519-js",
+  "version": "0.0.4-native.1",
+  "description": "curve25519-js replacement — XEdDSA sign/verify native Rust, X25519 node:crypto",
+  "main": "index.cjs",
+  "license": "MIT",
+  "files": [
+    "index.cjs",
+    "curve25519.linux-x64-gnu.node"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}

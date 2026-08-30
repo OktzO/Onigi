@@ -1,14 +1,20 @@
 {
-  "name": "ourin-baileys",
+  "name": "@oktzo/oktz-baileys",
   "type": "module",
-  "version": "9.0.21",
-  "description": "Modded Baileys v7 with interactive message, album, newsletter, and VoIP support",
+  "version": "9.0.22",
+  "description": "Fork ourin-baileys — XEdDSA curve25519 native (Rust) sign/verify",
   "license": "MIT",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com"
+  },
   "files": [
     "lib/**/*",
-    "WAProto/**/*"
+    "WAProto/**/*",
+    "native/curve25519/index.cjs",
+    "native/curve25519/package.json",
+    "native/curve25519/curve25519.linux-x64-gnu.node"
   ],
   "scripts": {
     "build": "node -e \"const{execSync:e}=require('child_process');try{e('npx tsc -P tsconfig.build.json',{stdio:'inherit'})}catch(x){};e('npx tsc-esm-fix --tsconfig=tsconfig.build.json --ext=.js',{stdio:'inherit'})\""
