@@ -17,6 +17,8 @@ use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;
 use curve25519_dalek::MontgomeryPoint;
 
+use ed25519_dalek::{VerifyingKey, Signature, Verifier};
+
 use sha2::{Digest, Sha512};
 
 /// B-poin Edwards (base point) yang sama dengan B di curve25519-js.
@@ -144,6 +146,14 @@ pub fn sign(secret_key: Uint8Array, msg: Uint8Array, opt_random: Option<Uint8Arr
 }
 
 /// verify(publicKey, msg, signature) → bool (XEdDSA verify)
+///
+/// XEdDSA verify = Ed25519 verify standar setelah:
+///   1. convertPublicKey: montgomery u → edwards y = (u-1)/(u+1)
+///   2. restore sign bit dari signature[63] ke pubkey
+///   3. hapus sign bit dari signature[63] (kembalikan S asli)
+/// Pakai ed25519-dalek verify (R = S*B + h*A), bukan manual — dalek lebih
+/// aman + sudah divalidasi. Nonce di verify memang standard (h = SHA512(R||A||m));
+/// yang custom cuma di sisi sign.
 #[napi]
 pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) -> Result<bool> {
     check_len(&public_key, 32, "public key")?;
@@ -151,27 +161,21 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
     let pk: [u8; 32] = public_key[..32].try_into().unwrap();
     let sig: [u8; 64] = signature[..64].try_into().unwrap();
 
-    // S = signature[32..64] dengan sign bit dihapus.
+    // Restore sign bit dari signature ke pubkey (edwards).
     let sign_bit = sig[63] & 128;
-    let mut s_bytes = [0u8; 32];
-    s_bytes.copy_from_slice(&sig[32..64]);
-    s_bytes[31] &= 127; // hapus sign bit dari S
-
-    // Konversi montgomery pk → edwards point, restore sign bit (sign=0/1).
-    let a_point = match pubkey_montgomery_to_edwards(&pk, sign_bit >> 7) {
-        Some(p) => p,
+    let a_bytes = match pubkey_montgomery_to_edwards(&pk, sign_bit >> 7) {
+        Some(p) => p.compress().to_bytes(),
         None => return Ok(false),
     };
 
-    // A (edwards, sign-restored) → bytes. h = SHA512(R || A || msg).
-    // PERSIS crypto_sign_open JS: m = sm, lalu m[32..64] = edpk (hasil konversi).
-    let a_bytes = a_point.compress().to_bytes();
-    let r_bytes: [u8; 32] = sig[..32].try_into().unwrap();
-    let h = challenge(&r_bytes, &a_bytes, &msg);
+    // Hapus sign bit dari signature → S asli.
+    let mut sig_clean = sig;
+    sig_clean[63] &= 127;
 
-    // p = h*A + S*B, bandingkan dengan R
-    let s_scalar = Scalar::from_bytes_mod_order(s_bytes);
-    let p = EdwardsPoint::vartime_double_scalar_mul_basepoint(&h, &a_point, &s_scalar);
-    let p_bytes = p.compress().to_bytes();
-    Ok(p_bytes == r_bytes)
+    let signature = Signature::from_bytes(&sig_clean);
+    let vk = match VerifyingKey::from_bytes(&a_bytes) {
+        Ok(v) => v,
+        Err(_) => return Ok(false),
+    };
+    Ok(vk.verify(&msg, &signature).is_ok())
 }
