@@ -1,0 +1,7 @@
+# secrets — JANGAN commit
+.env
+
+# build artifacts
+target/
+node_modules/
+*.node
