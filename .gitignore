@@ -5,3 +5,6 @@
 target/
 node_modules/
 *.node
+
+# docs — lokal saja, bukan bagian package
+docs/
