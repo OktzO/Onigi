@@ -1,7 +1,7 @@
 {
   "name": "oktz-baileys",
   "type": "module",
-  "version": "9.1.1",
+  "version": "9.1.2",
   "description": "Fork ourin-baileys — curve-native adaptor (XEdDSA Rust + node:crypto) di lib, tanpa override consumer",
   "license": "MIT",
   "main": "lib/index.js",
@@ -39,7 +39,7 @@
     "protobufjs": "^7.2.4",
     "whatsapp-rust-bridge": "0.5.2",
     "ws": "^8.13.0",
-    "oktz-signal": "^0.1.2"
+    "oktz-signal": "^0.1.3"
   },
   "devDependencies": {
     "@types/node": "^20.9.0",
