@@ -21,6 +21,8 @@ use ed25519_dalek::{VerifyingKey, Signature, Verifier};
 
 use sha2::{Digest, Sha512};
 
+use zeroize::Zeroizing;
+
 /// B-poin Edwards (base point) yang sama dengan B di curve25519-js.
 const B: EdwardsPoint = ED25519_BASEPOINT_POINT;
 
@@ -88,9 +90,10 @@ fn challenge(r: &[u8; 32], a: &[u8; 32], msg: &[u8]) -> Scalar {
 /// Sign inti. sk = clamped secret (32B). Mengembalikan signature 64 byte
 /// (R || S), dengan sign bit dari pubkey di byte ke-63 (persis curve25519-js).
 fn sign_internal(sk_raw: &[u8; 32], msg: &[u8], rnd: Option<&[u8; 64]>) -> [u8; 64] {
-    let sk = clamp_scalar(sk_raw);
+    // Zeroizing: wipe clamped secret saat drop (stack/error path sekalipun).
+    let sk = Zeroizing::new(clamp_scalar(sk_raw));
     // scalar a untuk pubkey & S. JS pakai byte mentah (mod L), sama saja.
-    let a = Scalar::from_bytes_mod_order(sk);
+    let a = Scalar::from_bytes_mod_order(*sk);
     // A = a*B (Edwards), packed. signBit = A[31] & 128.
     let a_bytes = base_mult_scalar(&a);
     let sign_bit = a_bytes[31] & 128;
@@ -140,7 +143,7 @@ pub fn sign(secret_key: Uint8Array, msg: Uint8Array, opt_random: Option<Uint8Arr
         check_len(&r, 64, "random data")?;
         rnd = Some(r[..64].try_into().unwrap());
     }
-    let sk: [u8; 32] = secret_key[..32].try_into().unwrap();
+    let sk = Zeroizing::new(<[u8; 32]>::try_from(&secret_key[..32]).unwrap());
     let sig = sign_internal(&sk, &msg, rnd.as_ref());
     Ok(Buffer::from(sig.to_vec()))
 }

@@ -12,8 +12,32 @@
 'use strict';
 
 const { generateKeyPairSync, diffieHellman, createPrivateKey, createPublicKey } = require('crypto');
+const { existsSync } = require('fs');
+const { join } = require('path');
 
-const native = require('./curve25519.linux-x64-gnu.node');
+const native = loadNative();
+
+function loadNative() {
+  // pola nama napi-rs: <name>.<platform>-<arch>-<libc>.node
+  const candidates = [
+    `curve25519.${process.platform}-${process.arch}-gnu.node`,
+    `curve25519.${process.platform}-${process.arch}-musl.node`,
+    `curve25519.${process.platform}-${process.arch}.node`,
+  ];
+  const here = __dirname;
+  for (const name of candidates) {
+    const p = join(here, name);
+    if (existsSync(p)) {
+      // eslint-disable-next-line import/no-dynamic-require
+      return require(p);
+    }
+  }
+  throw new Error(
+    `oktz-curve25519: no prebuilt native binary for ${process.platform}-${process.arch}. ` +
+      `Supported saat ini: linux-x64-gnu (curve25519.linux-x64-gnu.node). ` +
+      `Build native dari native/curve25519 (cargo build --release) lalu salin .node ke direktori ini.`,
+  );
+}
 
 // DER prefixes untuk X25519 (sama dengan libsignal/src/curve.js).
 const PUBLIC_KEY_DER_PREFIX = Buffer.from([48, 42, 48, 5, 6, 3, 43, 101, 110, 3, 33, 0]);

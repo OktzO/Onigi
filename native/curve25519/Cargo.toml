@@ -9,9 +9,10 @@ crate-type = ["cdylib"]
 [dependencies]
 napi = { version = "3.12.2", features = ["full"] }
 napi-derive = "3.6.3"
-curve25519-dalek = "4"
-ed25519-dalek = "2"
+curve25519-dalek = { version = "4", features = ["zeroize"] }
+ed25519-dalek = { version = "2", features = ["zeroize"] }
 sha2 = "0.10"
+zeroize = { version = "1", features = ["derive"] }
 
 [build-dependencies]
 napi-build = "2.4.1"

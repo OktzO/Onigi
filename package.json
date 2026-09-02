@@ -34,17 +34,16 @@
     "lru-cache": "^11.1.0",
     "music-metadata": "^11.7.0",
     "oktz-curve25519": "^0.0.4",
+    "oktz-signal": "^0.1.7",
     "p-queue": "^9.0.0",
     "pino": "^9.6",
     "protobufjs": "^7.2.4",
     "whatsapp-rust-bridge": "0.5.2",
-    "ws": "^8.13.0",
-    "oktz-signal": "^0.1.7"
+    "ws": "^8.13.0"
   },
   "devDependencies": {
     "@types/node": "^20.9.0",
     "@types/ws": "^8.0.0",
-    "javascript-obfuscator": "^5.4.1",
     "link-preview-js": "^3.0.0",
     "protobufjs-cli": "^2.0.1",
     "tsc-esm-fix": "^3.1.2",
