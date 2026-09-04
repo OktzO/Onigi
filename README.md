@@ -4,7 +4,7 @@
 
 **Lightweight WhatsApp Bot library — fully rebased onto `@whiskeysockets/baileys` 7.0.0-rc14**
 
-[![Version](https://img.shields.io/badge/npm-10.0.0--rc1-25D366?style=for-the-badge&logo=whatsapp&logoColor=white)](https://www.npmjs.com/package/onigi-baileys)
+[![Version](https://img.shields.io/badge/npm-10.0.0-25D366?style=for-the-badge&logo=whatsapp&logoColor=white)](https://www.npmjs.com/package/onigis)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D20.0.0-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
 [![Baileys](https://img.shields.io/badge/Base-Baileys%207.0.0--rc14-blue?style=for-the-badge)](https://github.com/WhiskeySockets/Baileys)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
@@ -50,7 +50,7 @@ Project focus: **multimedia WhatsApp bots** — audio, video, image and sticker 
 ## Installation
 
 ```bash
-npm install onigi-baileys
+npm install onigis
 ```
 
 ### Optional dependencies (install per feature)
@@ -68,7 +68,7 @@ npm install onigi-baileys
 ## Quick Start
 
 ```js
-import makeWASocket, { useMultiFileAuthState } from 'onigi-baileys';
+import makeWASocket, { useMultiFileAuthState } from 'onigis';
 
 const { state, saveCreds } = await useMultiFileAuthState('auth_info');
 
@@ -119,7 +119,7 @@ await sock.sendMessage(jid, {
 ### Convert video/audio before sending (media-processor)
 
 ```js
-import { convertToWhatsAppVideo, convertToOpusAudio, getVideoThumbnail, resizeImage } from 'onigi-baileys';
+import { convertToWhatsAppVideo, convertToOpusAudio, getVideoThumbnail, resizeImage } from 'onigis';
 
 // Any video -> WhatsApp-compatible MP4/H.264 (requires fluent-ffmpeg)
 const mp4 = await convertToWhatsAppVideo(rawBuffer);
@@ -136,7 +136,7 @@ const small = await resizeImage(imageBuffer, { width: 300, height: 300 });
 ### Probe media metadata
 
 ```js
-import { probeMedia, getMp4Duration } from 'onigi-baileys';
+import { probeMedia, getMp4Duration } from 'onigis';
 
 const meta = await probeMedia(buffer, 'audio/mpeg'); // { duration, bitrate, container, codec }
 const dur = getMp4Duration(mp4Buffer); // no ffmpeg needed — parses atoms directly
@@ -149,7 +149,7 @@ const dur = getMp4Duration(mp4Buffer); // no ffmpeg needed — parses atoms dire
 Send an HTML/CSS/JS interface that **renders directly inside the message bubble** — great for interactive menus, mini-apps and dashboards:
 
 ```js
-import { sendInlineWebUI } from 'onigi-baileys';
+import { sendInlineWebUI } from 'onigis';
 
 const html = `<!DOCTYPE html>
 <html><head><style>body{background:#111b21;color:#fff;font-family:sans-serif;padding:16px}</style></head>

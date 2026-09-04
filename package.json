@@ -1,9 +1,14 @@
 {
-  "name": "onigi-baileys",
+  "name": "onigis",
   "type": "module",
-  "version": "10.0.0-rc1",
+  "version": "10.0.0",
   "description": "Onigi-Baileys — rebase @whiskeysockets/baileys 7.0.0-rc14 + E2EE via oktz-signal (MIT). Fokus: bot WhatsApp multi-media, footprint RAM rendah.",
   "license": "MIT",
+  "author": "OktzO <oktznih@outlook.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OktzO/Onigi.git"
+  },
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "files": [
