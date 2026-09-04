@@ -1,8 +1,9 @@
+import NodeCache from '@cacheable/node-cache';
 import { Boom } from '@hapi/boom';
 import Long from 'long';
 import { proto } from '../../WAProto/index.js';
-import type { MessageReceiptType, MessageRelayOptions, SocketConfig, WAMessage, WAMessageKey } from '../Types/index.js';
-import { type BinaryNode } from '../WABinary/index.js';
+import type { MessageReceiptType, MessageRelayOptions, NewChatMessageCapInfo, SocketConfig, WAMessage, WAMessageKey } from '../Types/index.js';
+import { type BinaryNode, type JidWithDevice } from '../WABinary/index.js';
 export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
     sendMessageAck: (node: BinaryNode, errorCode?: number) => Promise<void>;
     sendRetryRequest: (node: BinaryNode, forceIncludeKeys?: boolean) => Promise<void>;
@@ -10,14 +11,18 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
     fetchMessageHistory: (count: number, oldestMsgKey: WAMessageKey, oldestMsgTimestamp: number | Long) => Promise<string>;
     requestPlaceholderResend: (messageKey: WAMessageKey, msgData?: Partial<WAMessage>) => Promise<string | undefined>;
     messageRetryManager: import("../Utils/index.js").MessageRetryManager | null;
-    getPrivacyTokens: (jids: string[]) => Promise<any>;
+    userDevicesCache: import("../Types/index.js").PossiblyExtendedCacheStore | NodeCache<JidWithDevice[]>;
+    devicesMutex: {
+        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+    };
+    issuePrivacyTokens: (jids: string[], timestamp?: number) => Promise<any>;
     assertSessions: (jids: string[], force?: boolean) => Promise<boolean>;
-    relayMessage: (jid: string, message: proto.IMessage, { messageId: msgId, participant, additionalAttributes, additionalNodes, useUserDevicesCache, useCachedGroupMetadata, statusJidList, }: MessageRelayOptions) => Promise<string>;
+    relayMessage: (jid: string, message: proto.IMessage, { messageId: msgId, participant, additionalAttributes, additionalNodes, useUserDevicesCache, useCachedGroupMetadata, statusJidList }: MessageRelayOptions) => Promise<string>;
     sendReceipt: (jid: string, participant: string | undefined, messageIds: string[], type: MessageReceiptType) => Promise<void>;
     sendReceipts: (keys: WAMessageKey[], type: MessageReceiptType) => Promise<void>;
-    ourin: import("./dugong.js").Dugong;
     readMessages: (keys: WAMessageKey[]) => Promise<void>;
     refreshMediaConn: (forceGet?: boolean) => Promise<import("../Types/index.js").MediaConnInfo>;
+    getMediaHost: () => string;
     waUploadToServer: import("../Types/index.js").WAMediaUploadFunction;
     fetchPrivacySettings: (force?: boolean) => Promise<{
         [_: string]: string;
@@ -27,62 +32,12 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
         nodes: BinaryNode[];
         shouldIncludeDeviceIdentity: boolean;
     }>;
-    getUSyncDevices: (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => Promise<(import("../WABinary/index.js").JidWithDevice & {
+    getUSyncDevices: (jids: string[], useCache: boolean, ignoreZeroDevices: boolean) => Promise<(JidWithDevice & {
         jid: string;
     })[]>;
     updateMemberLabel: (jid: string, memberLabel: string) => Promise<string>;
     updateMediaMessage: (message: WAMessage) => Promise<WAMessage>;
-    sendStatusMention: (content: any, jids?: string[]) => Promise<WAMessage>;
-    sendTable: (jid: string, title: string, headers: string[], rows: string[][], quoted?: any, options?: import("../Utils/index.js").RichMessageOptions) => Promise<{
-        message: any;
-        messageId: string;
-    }>;
-    sendList: (jid: string, title: string, items: (string | string[])[], quoted?: any, options?: import("../Utils/index.js").RichMessageOptions) => Promise<{
-        message: any;
-        messageId: string;
-    }>;
-    sendCodeBlock: (jid: string, code: string, quoted?: any, options?: import("../Utils/index.js").CodeBlockOptions) => Promise<{
-        message: any;
-        messageId: string;
-    }>;
-    sendLatex: (jid: string, quoted: any, options: import("../Utils/index.js").LatexOptions) => Promise<{
-        message: any;
-        messageId: string;
-    }>;
-    sendLatexImage: (jid: string, quoted: any, options: import("../Utils/index.js").LatexImageOptions, renderLatexToPng: import("../Utils/index.js").LatexRenderFn, uploadFn: import("../Utils/index.js").MediaUploadFn) => Promise<{
-        message: any;
-        messageId: string;
-    }>;
-    sendLatexInlineImage: (jid: string, quoted: any, options: import("../Utils/index.js").LatexImageOptions, renderLatexToPng: import("../Utils/index.js").LatexRenderFn, uploadFn: import("../Utils/index.js").MediaUploadFn) => Promise<{
-        message: any;
-        messageId: string;
-    }>;
-    captureUnifiedResponse: (msg: proto.IMessage) => import("../Utils/index.js").CapturedUnifiedResponse | null;
-    sendUnifiedResponse: (jid: string, quoted: any, captured: import("../Utils/index.js").CapturedUnifiedResponse) => Promise<{
-        message: any;
-        messageId: string;
-    }>;
-    sendRichMessage: (jid: string, submessages: proto.IAIRichResponseSubMessage[], quoted?: any, options?: {}) => Promise<{
-        message: any;
-        messageId: string;
-    }>;
-    sendMessage: (jid: string, content: import("../Types/index.js").AnyMessageContent, options?: import("../Types/index.js").MiscMessageGenerationOptions) => Promise<any>;
-    newsletterFetchAllSubscribe: () => Promise<unknown>;
-    newsletterMultipleFollow: (jids: string) => Promise<void>;
-    newsletterAction: (jid: string, type: string) => Promise<void>;
-    cekIDSaluran: (url: string) => Promise<{
-        id: any;
-        state: any;
-        creation_time: number;
-        name: any;
-        description: any;
-        invite: any;
-        picture: string;
-        preview: string;
-        subscribers: number;
-        verification: any;
-        viewer_metadata: any;
-    }>;
+    sendMessage: (jid: string, content: import("../Types/index.js").AnyMessageContent, options?: import("../Types/index.js").MiscMessageGenerationOptions) => Promise<WAMessage | undefined>;
     newsletterCreate: (name: string, description?: string) => Promise<import("../Types/index.js").NewsletterMetadata>;
     newsletterUpdate: (jid: string, updates: import("../Types/index.js").NewsletterUpdate) => Promise<unknown>;
     newsletterSubscribers: (jid: string) => Promise<{
@@ -136,6 +91,11 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
     groupFetchAllParticipating: () => Promise<{
         [_: string]: import("../Types/index.js").GroupMetadata;
     }>;
+    serverProps: {
+        privacyTokenOn1to1: boolean;
+        profilePicPrivacyToken: boolean;
+        lidTrustedTokenIssueToLid: boolean;
+    };
     createCallLink: (type: "audio" | "video", event?: {
         startTime: number;
     }, timeoutMs?: number) => Promise<string | undefined>;
@@ -184,6 +144,7 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
     cleanDirtyBits: (type: "account_sync" | "groups", fromTimestamp?: number | string) => Promise<void>;
     addOrEditContact: (jid: string, contact: proto.SyncActionValue.IContactAction) => Promise<void>;
     removeContact: (jid: string) => Promise<void>;
+    placeholderResendCache: import("../Types/index.js").CacheStore;
     addLabel: (jid: string, labels: import("../Types/Label.js").LabelActionBody) => Promise<void>;
     addChatLabel: (jid: string, labelId: string) => Promise<void>;
     removeChatLabel: (jid: string, labelId: string) => Promise<void>;
@@ -203,6 +164,7 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
         createBufferedFunction<A extends any[], T>(work: (...args: A) => Promise<T>): (...args: A) => Promise<T>;
         flush(): boolean;
         isBuffering(): boolean;
+        destroy(): void;
     };
     authState: {
         creds: import("../Types/index.js").AuthenticationCreds;
@@ -218,8 +180,9 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
     sendNode: (frame: BinaryNode) => Promise<void>;
     logout: (msg?: string) => Promise<void>;
     end: (error: Error | undefined) => Promise<void>;
+    registerSocketEndHandler: (handler: (error: Error | undefined) => void | Promise<void>) => void;
     onUnexpectedError: (err: Error | Boom, msg: string) => void;
-    uploadPreKeys: (count?: number, retryCount?: number) => Promise<void>;
+    uploadPreKeys: (count?: number) => Promise<void>;
     uploadPreKeysToServerIfRequired: () => Promise<void>;
     digestKeyBundle: () => Promise<void>;
     rotateSignedPreKey: () => Promise<void>;
@@ -234,5 +197,7 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
         jid: string;
         exists: boolean;
     }[] | undefined>;
+    fetchAccountReachoutTimelock: () => Promise<import("../Types/index.js").ReachoutTimelockState>;
+    fetchNewChatMessageCap: () => Promise<NewChatMessageCapInfo>;
 };
 //# sourceMappingURL=messages-recv.d.ts.map

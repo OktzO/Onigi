@@ -1,6 +1,6 @@
 import { Boom } from '@hapi/boom';
 import type { Agent } from 'https';
-import { Readable } from 'stream';
+import { Readable, Transform } from 'stream';
 import { URL } from 'url';
 import { proto } from '../../WAProto/index.js';
 import { type MediaType } from '../Defaults/index.js';
@@ -10,7 +10,7 @@ import type { ILogger } from './logger.js';
 export declare const hkdfInfoKey: (type: MediaType) => string;
 export declare const getRawMediaUploadData: (media: WAMediaUpload, mediaType: MediaType, logger?: ILogger) => Promise<{
     filePath: string;
-    fileSha256: Buffer;
+    fileSha256: Buffer<ArrayBufferLike>;
     fileLength: number;
 }>;
 /** generates all the keys required to encrypt/decrypt & sign a media message */
@@ -27,7 +27,7 @@ export declare const generateProfilePicture: (mediaUpload: WAMediaUpload, dimens
     width: number;
     height: number;
 }) => Promise<{
-    img: Buffer;
+    img: Buffer<ArrayBufferLike>;
 }>;
 /** gets the SHA256 of the given media message */
 export declare const mediaMessageSHA256B64: (message: WAMessageContent) => string | null | undefined;
@@ -37,7 +37,7 @@ export declare function getAudioDuration(buffer: Buffer | string | Readable): Pr
  */
 export declare function getAudioWaveform(buffer: Buffer | string | Readable, logger?: ILogger): Promise<Uint8Array<ArrayBuffer> | undefined>;
 export declare const toReadable: (buffer: Buffer) => Readable;
-export declare const toBuffer: (stream: Readable) => Promise<Buffer>;
+export declare const toBuffer: (stream: Readable) => Promise<Buffer<ArrayBuffer>>;
 export declare const getStream: (item: WAMediaUpload, opts?: RequestInit & {
     maxContentLength?: number;
 }) => Promise<{
@@ -47,7 +47,7 @@ export declare const getStream: (item: WAMediaUpload, opts?: RequestInit & {
     readonly stream: Readable;
     readonly type: "readable";
 } | {
-    readonly stream: any;
+    readonly stream: Readable;
     readonly type: "remote";
 } | {
     readonly stream: import("fs").ReadStream;
@@ -65,33 +65,36 @@ export declare function generateThumbnail(file: string, mediaType: 'video' | 'im
 }>;
 export declare const getHttpStream: (url: string | URL, options?: RequestInit & {
     isStream?: true;
-}) => Promise<any>;
+}) => Promise<Readable>;
 type EncryptedStreamOptions = {
     saveOriginalFileIfRequired?: boolean;
     logger?: ILogger;
     opts?: RequestInit;
 };
 export declare const encryptedStream: (media: WAMediaUpload, mediaType: MediaType, { logger, saveOriginalFileIfRequired, opts }?: EncryptedStreamOptions) => Promise<{
-    mediaKey: Buffer;
+    mediaKey: Buffer<ArrayBufferLike>;
     originalFilePath: string | undefined;
     encFilePath: string;
-    mac: Buffer;
-    fileEncSha256: Buffer;
-    fileSha256: Buffer;
+    mac: Buffer<ArrayBuffer>;
+    fileEncSha256: Buffer<ArrayBufferLike>;
+    fileSha256: Buffer<ArrayBufferLike>;
     fileLength: number;
 }>;
+export declare const DEF_MEDIA_HOST = "mmg.whatsapp.net";
 export type MediaDownloadOptions = {
     startByte?: number;
     endByte?: number;
     options?: RequestInit;
+    /** Optional media host override; falls back to DEF_MEDIA_HOST when not provided. */
+    host?: string;
 };
-export declare const getUrlFromDirectPath: (directPath: string) => string;
-export declare const downloadContentFromMessage: ({ mediaKey, directPath, url }: DownloadableMessage, type: MediaType, opts?: MediaDownloadOptions) => Promise<any>;
+export declare const getUrlFromDirectPath: (directPath: string, host?: string) => string;
+export declare const downloadContentFromMessage: ({ mediaKey, directPath, url }: DownloadableMessage, type: MediaType, opts?: MediaDownloadOptions) => Promise<Transform>;
 /**
  * Decrypts and downloads an AES256-CBC encrypted file given the keys.
  * Assumes the SHA256 of the plaintext is appended to the end of the ciphertext
  * */
-export declare const downloadEncryptedContent: (downloadUrl: string, { cipherKey, iv }: MediaDecryptionKeyInfo, { startByte, endByte, options }?: MediaDownloadOptions) => Promise<any>;
+export declare const downloadEncryptedContent: (downloadUrl: string, { cipherKey, iv }: MediaDecryptionKeyInfo, { startByte, endByte, options }?: MediaDownloadOptions) => Promise<Transform>;
 export declare function extensionForMediaMessage(message: WAMessageContent): string;
 type MediaUploadResult = {
     url?: string;

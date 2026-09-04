@@ -8,7 +8,7 @@ import type { GroupMetadata, GroupParticipant, ParticipantAction, RequestJoinAct
 import type { Label } from './Label.js';
 import type { LabelAssociation } from './LabelAssociation.js';
 import type { MessageUpsertType, MessageUserReceiptUpdate, WAMessage, WAMessageKey, WAMessageUpdate } from './Message.js';
-import type { ConnectionState } from './State.js';
+import type { ConnectionState, NewChatMessageCapInfo } from './State.js';
 export type BaileysEventMap = {
     /** connection state has been updated -- WS closed, opened, connecting etc. */
     'connection.update': Partial<ConnectionState>;
@@ -23,7 +23,21 @@ export type BaileysEventMap = {
         isLatest?: boolean;
         progress?: number | null;
         syncType?: proto.HistorySync.HistorySyncType | null;
+        pastParticipants?: proto.IPastParticipants[] | null;
+        chunkOrder?: number | null;
         peerDataRequestSessionId?: string | null;
+    };
+    /** signals history sync milestones (completion or stall) per sync type */
+    'messaging-history.status': {
+        /** which sync phase this status refers to */
+        syncType: proto.HistorySync.HistorySyncType;
+        /** the status of this sync phase */
+        status: 'complete' | 'paused';
+        /**
+         * progress === 100 was received from the server.
+         * when false, completion was inferred via timeout (no more chunks arriving).
+         */
+        explicit: boolean;
     };
     /** upsert chats */
     'chats.upsert': Chat[];
@@ -79,6 +93,7 @@ export type BaileysEventMap = {
         id: string;
         author: string;
         authorPn?: string;
+        authorUsername?: string;
         participants: GroupParticipant[];
         action: ParticipantAction;
     };
@@ -86,6 +101,7 @@ export type BaileysEventMap = {
         id: string;
         author: string;
         authorPn?: string;
+        authorUsername?: string;
         participant: string;
         participantPn?: string;
         action: RequestJoinAction;
@@ -138,6 +154,7 @@ export type BaileysEventMap = {
         id: string;
         update: any;
     };
+    'message-capping.update': NewChatMessageCapInfo;
     /** Settings and actions sync events */
     'chats.lock': {
         id: string;
@@ -184,6 +201,8 @@ export type BufferedEventData = {
         isLatest: boolean;
         progress?: number | null;
         syncType?: proto.HistorySync.HistorySyncType;
+        pastParticipants?: proto.IPastParticipants[];
+        chunkOrder?: number | null;
         peerDataRequestSessionId?: string;
     };
     chatUpserts: {

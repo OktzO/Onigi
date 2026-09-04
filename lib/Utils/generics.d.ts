@@ -1,3 +1,4 @@
+import type Long from 'long';
 import { proto } from '../../WAProto/index.js';
 import type { BaileysEventEmitter, BaileysEventMap, ConnectionState, WACallUpdateType, WAMessageKey, WAVersion } from '../Types/index.js';
 import { type BinaryNode } from '../WABinary/index.js';
@@ -7,10 +8,10 @@ export declare const BufferJSON: {
 };
 export declare const getKeyAuthor: (key: WAMessageKey | undefined | null, meId?: string) => string;
 export declare const isStringNullOrEmpty: (value: string | null | undefined) => value is null | undefined | "";
-export declare const writeRandomPadMax16: (msg: Uint8Array) => Buffer;
+export declare const writeRandomPadMax16: (msg: Uint8Array) => Buffer<ArrayBuffer>;
 export declare const unpadRandomMax16: (e: Uint8Array | Buffer) => Uint8Array<ArrayBuffer>;
 export declare const generateParticipantHashV2: (participants: string[]) => string;
-export declare const encodeWAMessage: (message: proto.IMessage) => Buffer;
+export declare const encodeWAMessage: (message: proto.IMessage) => Buffer<ArrayBuffer>;
 export declare const generateRegistrationId: () => number;
 export declare const encodeBigEndian: (e: number, t?: number) => Uint8Array<ArrayBuffer>;
 export declare const toNumber: (t: Long | number | null | undefined) => number;

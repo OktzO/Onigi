@@ -14,7 +14,7 @@ export declare const makeNoiseHandler: ({ keyPair: { private: privateKey, public
     mixIntoKey: (data: Uint8Array) => void;
     finishInit: () => Promise<void>;
     processHandshake: ({ serverHello }: proto.HandshakeMessage, noiseKey: KeyPair) => Uint8Array<ArrayBufferLike>;
-    encodeFrame: (data: Buffer | Uint8Array) => Buffer;
+    encodeFrame: (data: Buffer | Uint8Array) => Buffer<ArrayBuffer>;
     decodeFrame: (newData: Buffer | Uint8Array, onFrame: (buff: Uint8Array | BinaryNode) => void) => Promise<void>;
 };
 //# sourceMappingURL=noise-handler.d.ts.map
