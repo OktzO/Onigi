@@ -4,7 +4,7 @@
 
 **Lightweight WhatsApp Bot library — fully rebased onto `@whiskeysockets/baileys` 7.0.0-rc14**
 
-[![Version](https://img.shields.io/badge/npm-10.0.0-25D366?style=for-the-badge&logo=whatsapp&logoColor=white)](https://www.npmjs.com/package/onigis)
+[![Version](https://img.shields.io/badge/npm-10.0.1-25D366?style=for-the-badge&logo=whatsapp&logoColor=white)](https://www.npmjs.com/package/onigis)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D20.0.0-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
 [![Baileys](https://img.shields.io/badge/Base-Baileys%207.0.0--rc14-blue?style=for-the-badge)](https://github.com/WhiskeySockets/Baileys)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
@@ -168,6 +168,50 @@ await sendInlineWebUI(sock, jid, html, 'Bot Menu', {
 
 ---
 
+## Examples: Classic buttons & lists (render everywhere, new in 10.0.1)
+
+`interactiveMessage` + `nativeFlowMessage` cards are **no longer rendered** on many WhatsApp clients — `relayMessage` succeeds without error but the message silently doesn't appear. The classic `buttonsMessage` and `listMessage` templates render reliably on **every** client (Android/iOS/Web/Desktop).
+
+`onigis@10.0.1` ships ready-made builders in `lib/Utils/rich-classic.js`:
+
+```js
+import { buildButtonsMessage, buildListMessage, sendClassicMessage } from 'onigis';
+
+// 1-3 quick-reply buttons (optionally with a location+thumbnail header)
+const buttons = buildButtonsMessage({
+  text: 'Hello Brother — pick an option',
+  footer: '© My Bot',
+  buttons: [
+    { buttonId: '.owner', buttonText: '🧀 Owner' },
+    { buttonId: '.allmenu', buttonText: '💐 Allmenu' },
+  ],
+  locationMessage: { jpegThumbnail, name: 'My Bot', address: 'v10.0.1' },
+});
+
+// Scrollable list with sections and rows
+const list = buildListMessage({
+  title: '🍃 Menu — 1271 commands',
+  description: 'Pick a category',
+  buttonText: '🍃 Pilih Kategori',
+  sections: [{
+    title: 'Categories',
+    rows: [
+      { title: '🏠 main', description: '19 commands', rowId: '.menucat main' },
+      { title: '🎨 sticker', description: '42 commands', rowId: '.menucat sticker' },
+    ],
+  }],
+});
+
+// Send via relayMessage — userJid is normalized automatically
+// (handles sock.user.id vs the legacy non-existent sock.user.jid)
+await sendClassicMessage(sock, jid, buttons);
+await sendClassicMessage(sock, jid, list);
+```
+
+Also exports `normalizeUserJid(sockOrUserOrJid)` — `sock.user.jid` never existed in baileys 7.x (`sock.user` is `creds.me`, which has `.id`); this helper accepts any shape and returns a valid jid.
+
+---
+
 ## Default Configuration (RAM-friendly)
 
 ```js
@@ -187,6 +231,7 @@ const sock = makeWASocket({
 - Removed modules: `lib/VoIP/*` (WebRTC call client), `Modded/message_builder.js`, `Utils/rich-messages.js`, `Socket/dugong.js`, `Utils/sticker-pack.js`.
   - `rejectCall` remains available (core `messages-recv`).
   - Replacement for the old rich messages: `rich-webui.js` (`sendInlineWebUI`, `buildWebuiMessage`).
+- **10.0.1:** added `rich-classic.js` (`buildButtonsMessage`, `buildListMessage`, `sendClassicMessage`, `normalizeUserJid`) — `interactiveMessage`/`nativeFlowMessage` cards no longer render on many clients; use the classic templates for maximum compatibility.
 - Default config changed: `syncFullHistory` and `enableRecentMessageCache` are now `false`.
 - `protobufjs-cli` pinned to `^1.1.3` (peer dependency conflict fix); `link-preview-js` to `^5.0.0` (SSRF advisory fix).
 
