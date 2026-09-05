@@ -4,7 +4,7 @@
 
 **Lightweight WhatsApp Bot library — fully rebased onto `@whiskeysockets/baileys` 7.0.0-rc14**
 
-[![Version](https://img.shields.io/badge/npm-10.0.1-25D366?style=for-the-badge&logo=whatsapp&logoColor=white)](https://www.npmjs.com/package/onigis)
+[![Version](https://img.shields.io/badge/npm-10.0.2-25D366?style=for-the-badge&logo=whatsapp&logoColor=white)](https://www.npmjs.com/package/onigis)
 [![Node](https://img.shields.io/badge/Node.js-%3E%3D20.0.0-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
 [![Baileys](https://img.shields.io/badge/Base-Baileys%207.0.0--rc14-blue?style=for-the-badge)](https://github.com/WhiskeySockets/Baileys)
 [![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
@@ -232,6 +232,7 @@ const sock = makeWASocket({
   - `rejectCall` remains available (core `messages-recv`).
   - Replacement for the old rich messages: `rich-webui.js` (`sendInlineWebUI`, `buildWebuiMessage`).
 - **10.0.1:** added `rich-classic.js` (`buildButtonsMessage`, `buildListMessage`, `sendClassicMessage`, `normalizeUserJid`) — `interactiveMessage`/`nativeFlowMessage` cards no longer render on many clients; use the classic templates for maximum compatibility.
+- **10.0.2:** restored the ob9 auto-inject of the `<biz>` stanza node (ported from ourin-baileys 9.0.21) — `relayMessage` now automatically attaches the `biz` interactive node for `buttonsMessage` / `listMessage` / `interactiveMessage`+`nativeFlowMessage` payloads, unless the caller already provides one. Without this node the server accepts the stanza but the receiving client never renders the card (relay succeeds silently, message never appears). This regressed during the rebase to Baileys 7 and was the root cause of invisible button/list menus.
 - Default config changed: `syncFullHistory` and `enableRecentMessageCache` are now `false`.
 - `protobufjs-cli` pinned to `^1.1.3` (peer dependency conflict fix); `link-preview-js` to `^5.0.0` (SSRF advisory fix).
 
