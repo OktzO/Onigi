@@ -35,7 +35,7 @@
     "lru-cache": "^11.1.0",
     "music-metadata": "^11.12.3",
     "oktz-curve25519": "^0.0.4",
-    "oktz-signal": "^0.1.7",
+    "oktz-signal": "0.2.0-rc.1",
     "p-queue": "^9.0.0",
     "pino": "^9.6",
     "protobufjs": "^7.5.6",
