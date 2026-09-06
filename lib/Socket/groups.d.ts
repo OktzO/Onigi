@@ -54,7 +54,7 @@ export declare const makeGroupsSocket: (config: SocketConfig) => {
     }, timeoutMs?: number) => Promise<string | undefined>;
     getBotListV2: () => Promise<import("../Types/index.js").BotListInfo[]>;
     messageMutex: {
-        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+        mutex<T>(key: string, code: () => Promise<T> | T): Promise<T>;
     };
     receiptMutex: {
         mutex<T>(code: () => Promise<T> | T): Promise<T>;
@@ -63,7 +63,7 @@ export declare const makeGroupsSocket: (config: SocketConfig) => {
         mutex<T>(code: () => Promise<T> | T): Promise<T>;
     };
     notificationMutex: {
-        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+        mutex<T>(key: string, code: () => Promise<T> | T): Promise<T>;
     };
     fetchPrivacySettings: (force?: boolean) => Promise<{
         [_: string]: string;
