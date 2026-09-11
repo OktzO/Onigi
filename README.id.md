@@ -181,6 +181,59 @@ const sock = makeWASocket({
 
 ---
 
+## Performa (benchmark vs Baileys upstream)
+
+Diukur pada Node v20.19.1, Linux x64, loop in-process, bentuk pesan realistis (20 partisipan, buffer 96–128B). Semua script bisa direproduksi; verifikasi: test suite Onigi 31 pass + oracle interop oktz-signal bit-exact vs libsignal v6.
+
+### E2EE Signal Protocol (engine swap: oktz-signal vs libsignal)
+
+| Skenario | Onigi (oktz-signal, Rust) | Upstream (libsignal, JS) | Pemenang |
+|---|---:|---:|---|
+| **Build session penuh** (X3DH + PKMsg enc/dec, kunci acak) | **3,5 ms** | 31,8 ms | **Onigi 9× lebih cepat** |
+| **Steady-state per pesan** (ratchet enc+dec dua arah) | **195–330 µs** | 570–695 µs | **Onigi 2–3,5× lebih cepat** |
+| XEdDSA sign | 165,6 µs | 30,7 ms | **186× lebih cepat** |
+| XEdDSA verify | 138,9 µs | 32,3 ms | **233× lebih cepat** |
+| X25519 DH | 330,8 µs | 308,2 µs | ~par (keduanya native) |
+
+> Dalam praktik: setiap prekey message masuk dan setiap pembentukan session — operasi yang terjadi saat pairing device baru, setelah reinstall, dan saat peer rotasi key — 9× lebih murah di CPU. Untuk bot multi-chat yang sibuk, ini beda antara event-loop jank terlihat dan tidak sama sekali.
+
+### WABinary (codec binary protobuf-XML, rust encode default)
+
+| Implementasi | µs/op roundtrip | ops/s | vs upstream |
+|---|---:|---:|---|
+| **Onigi — Rust encode (default)** | **146,4** | 6.832 | **+5,7% lebih cepat** |
+| Onigi — JS fallback (`ONIGI_RUST_WABINARY=0`) | 155,7 | 6.422 | ~par |
+| Upstream baileys rc14 | 154,7 | 6.465 | baseline |
+| Onigi — Rust decode (`ONIGI_RUST_WABINARY_DECODE=1`, opt-in) | ~255 | ~3.900 | 65% lebih lambat — benar default OFF |
+
+### Keunggulan Onigi vs upstream rc14 (terverifikasi di kode)
+
+- **TC-token**: implementasi paritas penuh WA Web (persist index, merge write, prune 24 jam, bucket expiry 28 hari, re-issue setelah identity change, recovery 463, gating AB props) — upstream rc14 hanya parsial.
+- **Sistem retry (gaya whatsmeow)**: MessageRetryManager dengan deteksi collision baseKey, penjadwalan phone-request, kode error MAC — upstream rc14 tidak punya.
+- **Anti-spoof protocolMessage**: SELF_ONLY_TYPES di-drop dari origin non-self (port whatsmeow) — keunggulan security atas upstream.
+- **LTHash soft-recovery** saat app-state mismatch (warn + partial state) alih-alih hard-fail seperti upstream.
+- **Fix write-amplification**: debounce flush device-list (5 detik, satu `keys.set`), noise burst-concat, lazy stack-capture di timeout.
+- **LIDMappingStore** dengan inflight-coalescing (dedupe USync lookup bersamaan); queue offline node dibatasi 5000.
+
+### Celah yang ditemukan audit September 2026 (urut prioritas fix)
+
+| # | Severity | Masalah | Lokasi |
+|---|---|---|---|
+| 1 | CRITICAL (kebersihan rilis) | `package.json` pin `oktz-signal 0.2.0-rc.1` tapi `node_modules`/lockfile resolve **0.1.7** (`npm ls` → invalid) — versi yang dikirim ke user tidak pernah dites di tree ini | `package.json:38` |
+| 2 | HIGH | Bug session-selection oktz-signal (entry pertama BTreeMap, bukan session open) ter-trigger dari `encryptMessage` di setiap pesan keluar saat record punya >1 session (LID migration membuat record multi-session jadi kondisi *normal*). **Mitigasi di wrapper**: prune ke 1 session open sebelum encrypt | `lib/Signal/libsignal.js:115-124` |
+| 3 | HIGH | `process.nextTick(async …)` di `emitOwnEvents` **tanpa `.catch()`** — listener user yang throw jadi unhandledRejection (crash process di default Node 20) | `lib/Socket/messages-send.js:1202-1206` |
+| 4 | MEDIUM | `relayMessage` menahan mutex transaksi per-akun sepanjang pipeline termasuk RTT network — semua send terserial total saat load | `lib/Socket/messages-send.js:493-918` |
+| 5 | MEDIUM | `sender-key-memory` di-write unconditional per group send (seluruh map dipersist walau tidak ada recipient baru) | `lib/Socket/messages-send.js:609` |
+| 6 | MEDIUM | WAM telemetry: 831KB konstanta mati termuat ke module graph via `export * from './WAM/index.js'` — tidak pernah dipakai runtime | `lib/WAM/constants.js` |
+| 7 | MEDIUM | `historyCache` di event-buffer tanpa hard cap antar-flush — initial sync akun besar menahan setiap key yang pernah dilewati | `lib/Utils/event-buffer.js:27-79` |
+| 8 | MEDIUM | `+countChild.attrs.value` crash diam-diam bila child `<count>` absen (cek pre-key-low mati senyap) | `lib/Socket/messages-recv.js:560-561` |
+
+Hasil audit memory leak: **praktis bersih** — lifecycle cleanup socket menutup semua cache/timer, keyed mutex pakai refcount cleanup, `end()` idempotent. Sisa LOW: `setTimeout` 8 detik tanpa `unref()`, Map `fileLocks` level modul, dan gap historyCache di atas.
+
+Catatan gap test coverage: **jalur Signal/E2EE roundtrip punya nol test** — padahal komponen inilah yang diganti total. Menambah test roundtrip encrypt→decrypt adalah test bernilai tertinggi yang bisa dimiliki repo ini.
+
+---
+
 ## Breaking Changes dari 9.x (oktz-baileys lama)
 
 - Base direbase ke Baileys **7.0.0-rc14** (bukan lagi ourin-baileys 9.0.21).
