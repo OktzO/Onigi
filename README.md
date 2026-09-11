@@ -225,6 +225,59 @@ const sock = makeWASocket({
 
 ---
 
+## Performance (benchmarked vs upstream Baileys)
+
+Measured on Node v20.19.1, Linux x64, in-process loops, realistic message shapes (20 participants, 96–128B buffers). All scripts reproducible; verification: Onigi test suite 31 pass + oktz-signal oracle interop bit-exact vs libsignal v6.
+
+### E2EE Signal Protocol (the engine swap: oktz-signal vs libsignal)
+
+| Scenario | Onigi (oktz-signal, Rust) | Upstream (libsignal, JS) | Winner |
+|---|---:|---:|---|
+| **Full session build** (X3DH + PKMsg enc/dec, random keys) | **3.5 ms** | 31.8 ms | **Onigi 9× faster** |
+| **Steady-state per message** (bidirectional ratchet enc+dec) | **195–330 µs** | 570–695 µs | **Onigi 2–3.5× faster** |
+| XEdDSA sign | 165.6 µs | 30.7 ms | **186× faster** |
+| XEdDSA verify | 138.9 µs | 32.3 ms | **233× faster** |
+| X25519 DH | 330.8 µs | 308.2 µs | ~par (both native) |
+
+> In real terms: every incoming prekey message and every session establishment — the operations that happen when pairing new devices, after reinstalls, and when peers rotate — is 9× cheaper on CPU. On a busy multi-chat bot this is the difference between visible event-loop jank and none.
+
+### WABinary (protobuf-XML binary codec, default rust encode)
+
+| Implementation | µs/op roundtrip | ops/s | vs upstream |
+|---|---:|---:|---|
+| **Onigi — Rust encode (default)** | **146.4** | 6,832 | **+5.7% faster** |
+| Onigi — JS fallback (`ONIGI_RUST_WABINARY=0`) | 155.7 | 6,422 | ~par |
+| Upstream baileys rc14 | 154.7 | 6,465 | baseline |
+| Onigi — Rust decode (`ONIGI_RUST_WABINARY_DECODE=1`, opt-in) | ~255 | ~3,900 | 65% slower — correctly OFF by default |
+
+### Where Onigi is ahead of upstream rc14 (verified in code)
+
+- **TC-token**: full WA Web parity implementation (index persist, merge write, 24h prune, 28-day expiry buckets, re-issue after identity change, 463-recovery, AB props gating) — upstream rc14 has this only partially.
+- **Retry system (whatsmeow-style)**: MessageRetryManager with baseKey collision detection, phone-request scheduling, MAC-error codes — upstream rc14 has none of it.
+- **Anti-spoof protocolMessage**: SELF_ONLY_TYPES dropped from non-self origin (ported from whatsmeow) — security win over upstream.
+- **LTHash soft-recovery** on app-state mismatch (warn + partial state) instead of upstream's hard-fail.
+- **Write-amplification fixes**: device-list debounce flush (5s, single `keys.set`), noise burst-concat, lazy stack-capture in timeouts.
+- **LIDMappingStore** with inflight-coalescing (dedupes concurrent USync lookups); offline node queue capped at 5000.
+
+### Known gaps found in the September 2026 audit (fix-prioritized)
+
+| # | Severity | Issue | Location |
+|---|---|---|---|
+| 1 | CRITICAL (release hygiene) | `package.json` pins `oktz-signal 0.2.0-rc.1` but `node_modules`/lockfile resolve **0.1.7** (`npm ls` → invalid) — shipped version was never tested against this tree | `package.json:38` |
+| 2 | HIGH | oktz-signal session-selection bug (first BTreeMap entry instead of open session) is triggered from `encryptMessage` on every outgoing message when a record holds >1 session (LID migration makes multi-session records *normal*, not edge-case). **Mitigation available wrapper-side**: prune to 1 open session before encrypt | `lib/Signal/libsignal.js:115-124` |
+| 3 | HIGH | `process.nextTick(async …)` in `emitOwnEvents` has **no `.catch()`** — a throwing user message-listener becomes an unhandledRejection (process crash on Node 20 defaults) | `lib/Socket/messages-send.js:1202-1206` |
+| 4 | MEDIUM | `relayMessage` holds the per-account transaction mutex across the entire pipeline including network RTT — all sends fully serialized under load | `lib/Socket/messages-send.js:493-918` |
+| 5 | MEDIUM | `sender-key-memory` written unconditionally per group send (whole map persisted even with no new recipients) | `lib/Socket/messages-send.js:609` |
+| 6 | MEDIUM | WAM telemetry: 831KB of dead constants loaded into the module graph via `export * from './WAM/index.js'` — never used at runtime | `lib/WAM/constants.js` |
+| 7 | MEDIUM | `historyCache` in event-buffer has no hard cap between flushes — large initial syncs hold every key ever seen | `lib/Utils/event-buffer.js:27-79` |
+| 8 | MEDIUM | `+countChild.attrs.value` crashes silently if `<count>` child absent (pre-key-low check dies quietly) | `lib/Socket/messages-recv.js:560-561` |
+
+Memory leak audit result: **essentially clean** — socket cleanup lifecycle closes every cache/timer, keyed mutexes use refcount cleanup, `end()` is idempotent. Remaining LOW items: an 8s `setTimeout` without `unref()`, module-level `fileLocks` Map, and the historyCache gap above.
+
+Test-coverage gap worth noting: **the Signal/E2EE roundtrip path has zero tests** — despite being the component that was swapped entirely. Adding an encrypt→decrypt roundtrip test is the single highest-value test this repo can get.
+
+---
+
 ## Breaking Changes from 9.x (legacy oktz-baileys)
 
 - Base rebased to Baileys **7.0.0-rc14** (no longer ourin-baileys 9.0.21).
