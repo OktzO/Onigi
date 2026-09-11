@@ -101,7 +101,7 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
     }, timeoutMs?: number) => Promise<string | undefined>;
     getBotListV2: () => Promise<import("../Types/index.js").BotListInfo[]>;
     messageMutex: {
-        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+        mutex<T>(key: string, code: () => Promise<T> | T): Promise<T>;
     };
     receiptMutex: {
         mutex<T>(code: () => Promise<T> | T): Promise<T>;
@@ -110,7 +110,7 @@ export declare const makeMessagesRecvSocket: (config: SocketConfig) => {
         mutex<T>(code: () => Promise<T> | T): Promise<T>;
     };
     notificationMutex: {
-        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+        mutex<T>(key: string, code: () => Promise<T> | T): Promise<T>;
     };
     upsertMessage: (msg: WAMessage, type: import("../Types/index.js").MessageUpsertType) => Promise<void>;
     appPatch: (patchCreate: import("../Types/index.js").WAPatchCreate) => Promise<void>;

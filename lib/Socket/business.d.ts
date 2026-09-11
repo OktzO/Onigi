@@ -115,7 +115,7 @@ export declare const makeBusinessSocket: (config: SocketConfig) => {
     }, timeoutMs?: number) => Promise<string | undefined>;
     getBotListV2: () => Promise<import("../index.js").BotListInfo[]>;
     messageMutex: {
-        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+        mutex<T>(key: string, code: () => Promise<T> | T): Promise<T>;
     };
     receiptMutex: {
         mutex<T>(code: () => Promise<T> | T): Promise<T>;
@@ -124,7 +124,7 @@ export declare const makeBusinessSocket: (config: SocketConfig) => {
         mutex<T>(code: () => Promise<T> | T): Promise<T>;
     };
     notificationMutex: {
-        mutex<T>(code: () => Promise<T> | T): Promise<T>;
+        mutex<T>(key: string, code: () => Promise<T> | T): Promise<T>;
     };
     upsertMessage: (msg: import("../index.js").WAMessage, type: import("../index.js").MessageUpsertType) => Promise<void>;
     appPatch: (patchCreate: import("../index.js").WAPatchCreate) => Promise<void>;
