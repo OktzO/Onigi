@@ -6,13 +6,13 @@ export declare const createSignalIdentity: (wid: string, accountSignatureKey: Ui
 export declare const getPreKeys: ({ get }: SignalKeyStore, min: number, limit: number) => Promise<{
     [id: string]: KeyPair;
 }>;
-export declare const generateOrGetPreKeys: (creds: AuthenticationCreds, range: number) => {
+export declare const generateOrGetPreKeys: (creds: AuthenticationCreds, range: number) => Promise<{
     newPreKeys: {
         [id: number]: KeyPair;
     };
     lastPreKeyId: number;
     preKeysRange: readonly [number, number];
-};
+}>;
 export declare const xmppSignedPreKey: (key: SignedKeyPair) => BinaryNode;
 export declare const xmppPreKey: (pair: KeyPair, id: number) => BinaryNode;
 export declare const extractE2ESessionFromRetryReceipt: (receipt: BinaryNode) => {
