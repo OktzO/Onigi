@@ -6,8 +6,23 @@
   "license": "MIT",
   "files": [
     "index.cjs",
-    "curve25519.linux-x64-gnu.node"
+    "native-loader.cjs"
   ],
+  "scripts": {
+    "build": "napi build --release --platform --js-package-name @oktz-curve25519/curve25519",
+    "build:source": "napi build --release --platform --js-package-name @oktz-curve25519/curve25519",
+    "test": "node --test tests/"
+  },
+  "optionalDependencies": {
+    "@oktz-curve25519/curve25519-android-arm64": "0.0.4",
+    "@oktz-curve25519/curve25519-linux-arm64-gnu": "0.0.4",
+    "@oktz-curve25519/curve25519-linux-arm64-musl": "0.0.4",
+    "@oktz-curve25519/curve25519-linux-x64-gnu": "0.0.4",
+    "@oktz-curve25519/curve25519-linux-x64-musl": "0.0.4"
+  },
+  "devDependencies": {
+    "@napi-rs/cli": "^3.10.4"
+  },
   "engines": {
     "node": ">=20.0.0"
   }

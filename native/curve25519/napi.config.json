@@ -1,0 +1,11 @@
+{
+  "binaryName": "curve25519",
+  "packageName": "oktz-curve25519",
+  "targets": [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-unknown-linux-musl",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-unknown-linux-musl",
+    "aarch64-linux-android"
+  ]
+}
