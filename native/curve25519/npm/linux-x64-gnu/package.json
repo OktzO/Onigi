@@ -1,0 +1,22 @@
+{
+  "name": "@oktz-curve25519/curve25519-linux-x64-gnu",
+  "version": "0.0.4",
+  "cpu": [
+    "x64"
+  ],
+  "main": "curve25519.linux-x64-gnu.node",
+  "files": [
+    "curve25519.linux-x64-gnu.node"
+  ],
+  "description": "curve25519-js replacement — XEdDSA sign/verify native Rust, X25519 node:crypto",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "os": [
+    "linux"
+  ],
+  "libc": [
+    "glibc"
+  ]
+}

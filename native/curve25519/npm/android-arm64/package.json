@@ -1,0 +1,19 @@
+{
+  "name": "@oktz-curve25519/curve25519-android-arm64",
+  "version": "0.0.4",
+  "cpu": [
+    "arm64"
+  ],
+  "main": "curve25519.android-arm64.node",
+  "files": [
+    "curve25519.android-arm64.node"
+  ],
+  "description": "curve25519-js replacement — XEdDSA sign/verify native Rust, X25519 node:crypto",
+  "license": "MIT",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "os": [
+    "android"
+  ]
+}
