@@ -11,6 +11,7 @@
   "scripts": {
     "build": "napi build --release --platform --js-package-name @oktz-curve25519/curve25519",
     "build:source": "napi build --release --platform --js-package-name @oktz-curve25519/curve25519",
+    "build:manual": "cargo build --manifest-path Cargo.toml --release",
     "test": "node --test tests/"
   },
   "optionalDependencies": {
