@@ -39,11 +39,13 @@ Fokus proyek ini: **bot WhatsApp multi-media** — kirim/terima audio, video, ga
 
 | OS / Arsitektur | Status |
 |---|---|
-| Linux x86_64 (glibc) — Ubuntu, Debian, Fedora, dll | **Didukung penuh** |
-| Linux ARM64 / Alpine (musl) | Perlu build native tambahan |
-| Windows / macOS | Perlu build native tambahan |
+| Linux x86_64 (glibc) — Ubuntu, Debian, Fedora, dll | **Didukung** |
+| Linux ARM64 (glibc) | **Eksperimental** |
+| Linux ARM64 (musl) — Alpine | **Eksperimental** |
+| Windows x86_64 | **Tidak didukung** |
+| macOS x86_64 | **Tidak didukung** |
 
-> Native module (`oktz-signal`, `oktz-curve25519`) saat ini baru dipublish untuk **linux-x64-gnu**. Untuk platform lain, ikuti panduan build native (`BuildNative-Windows.md`, `BuildNative-macOS.md`, `BuildNative-Linux.md`, `BuildNative-CI-Matrix.md`).
+> Modul native (`oktz-signal`, `oktz-curve25519`, `whatsapp-rust-bridge`) saat ini baru dipublish untuk **linux-x64-gnu** saja. Untuk platform lain, ikuti panduan build native (`BuildNative-Windows.md`, `BuildNative-macOS.md`, `BuildNative-Linux.md`, `BuildNative-CI-Matrix.md`). Status di atas mencerminkan hasil CI smoke test (lihat `.github/workflows/platform-smoke.yml`).
 
 ---
 

@@ -39,11 +39,13 @@ Project focus: **multimedia WhatsApp bots** — audio, video, image and sticker 
 
 | OS / Architecture | Status |
 |---|---|
-| Linux x86_64 (glibc) — Ubuntu, Debian, Fedora, etc. | **Fully supported** |
-| Linux ARM64 / Alpine (musl) | Requires additional native build |
-| Windows / macOS | Requires additional native build |
+| Linux x86_64 (glibc) — Ubuntu, Debian, Fedora, etc. | **Supported** |
+| Linux ARM64 (glibc) | **Experimental** |
+| Linux ARM64 (musl) — Alpine | **Experimental** |
+| Windows x86_64 | **Unsupported** |
+| macOS x86_64 | **Unsupported** |
 
-> The native modules (`oktz-signal`, `oktz-curve25519`) are currently published for **linux-x64-gnu** only. For other platforms, see the native build guides (`BuildNative-Windows.md`, `BuildNative-macOS.md`, `BuildNative-Linux.md`, `BuildNative-CI-Matrix.md`).
+> The native modules (`oktz-signal`, `oktz-curve25519`, `whatsapp-rust-bridge`) are currently published for **linux-x64-gnu** only. For other platforms, see the native build guides (`BuildNative-Windows.md`, `BuildNative-macOS.md`, `BuildNative-Linux.md`, `BuildNative-CI-Matrix.md`). Statuses above reflect CI smoke test results (see `.github/workflows/platform-smoke.yml`).
 
 ---
 

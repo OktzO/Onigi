@@ -1,0 +1,58 @@
+name: Onigi Platform Smoke
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  smoke:
+    name: Smoke ${{ matrix.os }}/${{ matrix.arch }}
+    runs-on: ${{ matrix.runs-on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: linux
+            arch: x64
+            runs-on: ubuntu-latest
+            target: linux-x64-gnu
+          - os: linux
+            arch: arm64
+            runs-on: ubuntu-latest
+            target: linux-arm64-gnu
+          - os: linux
+            arch: arm64
+            runs-on: ubuntu-latest
+            target: linux-arm64-musl
+          - os: windows
+            arch: x64
+            runs-on: windows-latest
+            target: win32-x64-msvc
+          - os: macos
+            arch: x64
+            runs-on: macos-latest
+            target: darwin-x64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run platform smoke test
+        run: node --test tests/platform-smoke.test.mjs
+        env:
+          ONIGI_RUST_WABINARY: 0
+
+      - name: Run full test suite
+        run: npm test
+        env:
+          ONIGI_RUST_WABINARY: 0
