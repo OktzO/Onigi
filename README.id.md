@@ -55,6 +55,22 @@ Fokus proyek ini: **bot WhatsApp multi-media** — kirim/terima audio, video, ga
 npm install onigis
 ```
 
+### Verifikasi instalasi platform
+
+Setelah install, verifikasi native dependencies load di platform ini:
+
+```bash
+# Verifikasi native production dependencies (full gate)
+node --test tests/platform-smoke.test.mjs
+
+# Quick check per dependency
+node -e "import('oktz-signal').then(({ native }) => console.log(typeof native.ratchetEncrypt))"
+node -e "console.log(typeof require('oktz-curve25519').sign)"
+node -e "import('whatsapp-rust-bridge').then(({ expandAppStateKeys }) => console.log(typeof expandAppStateKeys))"
+```
+
+Semua command harus mengeluarkan `function`. Gagal = native binary tidak cocok platform atau gagal load.
+
 ### Dependency opsional (install sesuai fitur)
 
 | Package | Untuk fitur |
