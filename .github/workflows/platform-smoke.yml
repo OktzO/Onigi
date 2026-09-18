@@ -26,14 +26,6 @@ jobs:
             arch: arm64
             runs-on: ubuntu-latest
             target: linux-arm64-musl
-          - os: windows
-            arch: x64
-            runs-on: windows-latest
-            target: win32-x64-msvc
-          - os: macos
-            arch: x64
-            runs-on: macos-latest
-            target: darwin-x64
 
     steps:
       - uses: actions/checkout@v4
