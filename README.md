@@ -276,6 +276,7 @@ Measured on Node v20.19.1, Linux x64, in-process loops, realistic message shapes
 - **LTHash soft-recovery** on app-state mismatch (warn + partial state) instead of upstream's hard-fail.
 - **Write-amplification fixes**: device-list debounce flush (5s, single `keys.set`), noise burst-concat, lazy stack-capture in timeouts.
 - **LIDMappingStore** with inflight-coalescing (dedupes concurrent USync lookups); offline node queue capped at 5000.
+- Consistent LID resolution in public-facing flows: `onWhatsApp` accepts `@lid` JIDs (resolved via `lid-mapping` when available; skipped without a mapping — never fabricates a fake number), and reply/group `participant` is set to a `userJid` consistent with addressing (`creds.me.lid` for LID chats, `creds.me.id` for PN).
 
 ### Known gaps found in the September 2026 audit (fix-prioritized)
 
