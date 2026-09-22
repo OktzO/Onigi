@@ -232,6 +232,7 @@ Diukur pada Node v20.19.1, Linux x64, loop in-process, bentuk pesan realistis (2
 - **LTHash soft-recovery** saat app-state mismatch (warn + partial state) alih-alih hard-fail seperti upstream.
 - **Fix write-amplification**: debounce flush device-list (5 detik, satu `keys.set`), noise burst-concat, lazy stack-capture di timeout.
 - **LIDMappingStore** dengan inflight-coalescing (dedupe USync lookup bersamaan); queue offline node dibatasi 5000.
+- Resolusi LID yang konsisten di alur public-facing: `onWhatsApp` menerima JID `@lid` (resolve via `lid-mapping` bila ada; tanpa mapping → dilewati, tidak menghasilkan nomor palsu), `participant` reply/grup diisi `userJid` yang konsisten dengan addressing (`creds.me.lid` untuk percakapan LID, `creds.me.id` untuk PN).
 
 ### Celah yang ditemukan audit September 2026 (urut prioritas fix)
 
