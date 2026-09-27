@@ -148,6 +148,12 @@ export const makeSignalRepo = (over = {}) => {
 			return { type: 'msg', ciphertext: Buffer.from('ciphertext') };
 		};
 	}
+	// A fresh base key per call, so the retry path's "base key collision" guard
+	// (which forces a session reset of its own) stays out of the way.
+	if (over.distinctSessionBaseKeys) {
+		let seq = 0;
+		repo.getSessionInfo = async () => ({ registrationId: 1, baseKey: Buffer.alloc(32, ++seq) });
+	}
 	const innerDecrypt = repo.decryptMessage;
 	repo.decryptMessage = async args => { decryptCalls.push({ jid: args.jid, type: args.type }); return innerDecrypt(args); };
 	return repo;
