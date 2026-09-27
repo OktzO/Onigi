@@ -238,14 +238,41 @@ export const bootSocket = async (over = {}) => {
 	const h = await startHarness({ logger, config });
 
 	// Answer every <iq> the code under test sends, so nothing waits out the
-	// harness's 10-minute query timeout.
+	// harness's 10-minute query timeout. A usync gets a device list back, which
+	// is what drives the device-list persistence path.
+	const usyncUsers = over.usyncUsers;
 	const answered = new Set();
 	const pump = setInterval(() => {
 		for (const xml of logger.sentXml()) {
 			const id = /<iq [^>]*id='([^']+)'/.exec(xml)?.[1];
 			if (!id || answered.has(id)) continue;
 			answered.add(id);
-			h.sock.ws.emit(`CB:${id}`, { tag: 'iq', attrs: { id, type: 'result', xmlns: 'encrypt' } });
+			const isUsync = xml.includes("xmlns='usync'");
+			const result = { tag: 'iq', attrs: { id, type: 'result', xmlns: 'encrypt' } };
+			if (isUsync && usyncUsers?.length) {
+				result.content = [{
+					tag: 'usync',
+					attrs: { context: 'message', mode: 'query', sid: '0', last: 'true', index: '0' },
+					content: [{
+						tag: 'list',
+						attrs: {},
+						content: usyncUsers.map(({ jid, devices }) => ({
+							tag: 'user',
+							attrs: { jid },
+							content: [{
+								tag: 'devices',
+								attrs: {},
+								content: [{
+									tag: 'device-list',
+									attrs: {},
+									content: devices.map((d, i) => ({ tag: 'device', attrs: { id: String(d), 'key-index': String(i + 1) } }))
+								}]
+							}]
+						}))
+					}]
+				}];
+			}
+			h.sock.ws.emit(`TAG:${id}`, result);
 		}
 	}, 15);
 
