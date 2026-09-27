@@ -1,10 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { WebSocketServer } from 'ws';
-import { DEFAULT_CONNECTION_CONFIG } from '../lib/Defaults/index.js';
-import { makeChatsSocket } from '../lib/Socket/chats.js';
-import { isHostedLidUser, isLidUser } from '../lib/WABinary/index.js';
-import { noopLogger } from './helpers/ev-socket-harness.mjs';
+import { runScenario } from './helpers/ev-socket-harness.mjs';
 
 /*
  * sendPresenceUpdate() picked the own-identity attribute off a jid it had just
@@ -34,8 +30,15 @@ import { noopLogger } from './helpers/ev-socket-harness.mjs';
  * binaryNodeToString(frame) at logger.level === 'trace', and that function
  * filters undefined attrs -- so the stanza as the encoder will see it is exactly
  * what the log shows.
+ *
+ * Each scenario runs in a child: a real socket against a local ws server leaves
+ * the server handle and a timer behind, so an in-process file never exits.
  */
-const credsWith = (me) => ({
+const BUILDER = `import { WebSocketServer } from 'ws';
+import { DEFAULT_CONNECTION_CONFIG } from '/home/user/noddjs/Onigi/lib/Defaults/index.js';
+import { makeChatsSocket } from '/home/user/noddjs/Onigi/lib/Socket/chats.js';
+
+const credsWith = me => ({
 	noiseKey: { private: Buffer.alloc(32), public: Buffer.alloc(32, 1) },
 	signedIdentityKey: { private: Buffer.alloc(32, 2), public: Buffer.alloc(32, 3) },
 	signedPreKey: { keyId: 1, keyPair: { private: Buffer.alloc(32, 5), public: Buffer.alloc(32, 4) }, signature: Buffer.alloc(64) },
@@ -46,159 +49,169 @@ const credsWith = (me) => ({
 	registered: !!me,
 	pairingCode: 'ABCDEFGH'
 });
-
-const keyStore = () => {
-	const map = new Map();
-	return {
-		get: async (type, ids) => {
-			const v = map.get(type);
-			if (ids === undefined) { return v; }
-			return ids.map(id => (Array.isArray(v) ? v[id] : v?.[id]));
-		},
-		set: async d => { for (const [k, v] of Object.entries(d)) { map.set(k, v); } },
-		del: async k => { map.delete(k); },
-		bind: async fn => fn({ get: this.get, set: this.set, del: this.del })
-	};
+const map = new Map();
+const keys = {
+	get: async (t, ids) => { const v = map.get(t); if (ids === undefined) { return v; } const o = {}; for (const i of ids) { o[i] = v?.[i]; } return o; },
+	set: async d => { for (const [k, v] of Object.entries(d)) { map.set(k, v); } },
+	del: async k => { map.delete(k); },
+	bind: async fn => fn({ get: this.get, set: this.set, del: this.del })
 };
-
-const signalRepoStub = () => new Proxy({
-	lidMapping: {
-		storeLIDPNMappings: async () => { },
-		getPNForLID: async () => null,
-		getLIDForPN: async () => null
-	},
-	migrateSession: async () => { },
-	decryptMessage: async () => { throw new Error('not used'); },
-	encryptMessage: async () => { throw new Error('not used'); },
+const signalRepo = () => new Proxy({
+	lidMapping: { storeLIDPNMappings: async () => { }, getPNForLID: async () => null, getLIDForPN: async () => null },
 	close: () => { }
-}, { get: (target, prop) => (prop in target ? target[prop] : async () => undefined) });
+}, { get: (t, p) => (p in t ? t[p] : async () => undefined) });
 
-const chatsAnswering = async (me) => {
+const chatstateFor = async (me, to) => {
 	const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
 	await new Promise(res => wss.once('listening', res));
 	const logger = noopLogger();
 	logger.level = 'trace';
 	const sock = makeChatsSocket({
 		...DEFAULT_CONNECTION_CONFIG,
-		waWebSocketUrl: `ws://127.0.0.1:${wss.address().port}/ws/chat`,
+		waWebSocketUrl: 'ws://127.0.0.1:' + wss.address().port + '/ws/chat',
 		logger,
 		connectTimeoutMs: 600000,
 		defaultQueryTimeoutMs: 600000,
-		auth: { creds: credsWith(me), keys: keyStore() },
-		makeSignalRepository: signalRepoStub,
+		auth: { creds: credsWith(me), keys },
+		makeSignalRepository: signalRepo,
 		fireInitQueries: false
 	});
 	await new Promise(res => {
 		if (sock.ws.isOpen) { return res(); }
 		sock.ws.once('open', res);
 	});
-	await new Promise(res => setTimeout(res, 50));
-	const sent = () => logger.logs
+	await tick(50);
+	logger.logs.length = 0;
+	const outcome = await sock.sendPresenceUpdate('composing', to).then(
+		() => 'resolved',
+		e => 'rejected ' + e?.name
+	);
+	const sent = logger.logs
 		.filter(l => l[1]?.msg === 'xml send')
 		.map(l => String(l[1]?.xml))
-		.filter(xml => xml.includes('<chatstate') || xml.includes('<presence'));
-	const clear = () => { logger.logs.length = 0; };
-	return {
-		sock,
-		sent,
-		clear,
-		close: async () => {
-			try { await sock.end(new Error('test teardown')); } catch { }
-			await new Promise(res => wss.close(res));
-		}
-	};
+		.filter(x => x.includes('<chatstate') || x.includes('<presence'));
+	await sock.end(new Error('test teardown'));
+	await new Promise(res => wss.close(res));
+	return { outcome, sent };
 };
+const ME = { id: '11111:1@s.whatsapp.net', lid: '11111:1@lid', name: 'probe' };`;
 
-const ME = { id: '11111:1@s.whatsapp.net', lid: '11111:1@lid', name: 'probe' };
+const withMe = (meLiteral, to) => `
+${BUILDER}
+const { outcome, sent } = await chatstateFor(${meLiteral}, '${to}');
+console.log('outcome=' + outcome);
+console.log('sent=' + JSON.stringify(sent));
+process.exit(0);
+`;
 
 test('a chatstate to a @lid peer is sent from the LID identity', async () => {
-	const h = await chatsAnswering(ME);
-	try {
-		h.clear();
-		await h.sock.sendPresenceUpdate('composing', '99999:1@lid');
-		assert.equal(h.sent().length, 1, 'no chatstate reached the wire');
-		assert.match(h.sent()[0], /from='11111:1@lid'/);
-	}
-	finally {
-		await h.close();
-	}
+	const { code, stdout, stderr } = await runScenario(withMe('ME', '99999:1@lid'));
+	assert.equal(code, 0, stderr);
+	assert.match(stdout, /sent=\["<chatstate from='11111:1@lid'/);
 });
 
 test('a chatstate to a @hosted.lid peer is sent from the LID identity too', async () => {
-	const h = await chatsAnswering(ME);
-	try {
-		assert.ok(isHostedLidUser('99999:1@hosted.lid'), 'fixture assumption');
-		assert.ok(!isLidUser('99999:1@hosted.lid'), 'fixture assumption');
-		h.clear();
-		await h.sock.sendPresenceUpdate('composing', '99999:1@hosted.lid');
-		assert.equal(h.sent().length, 1, 'no chatstate reached the wire');
-		// old: server === 'lid' is false here, so this went out from the PN
-		assert.match(h.sent()[0], /from='11111:1@lid'/);
-	}
-	finally {
-		await h.close();
-	}
+	const { code, stdout, stderr } = await runScenario(`
+${BUILDER}
+const { isHostedLidUser, isLidUser } = await import('/home/user/noddjs/Onigi/lib/WABinary/index.js');
+console.log('hostedIsLid=' + isHostedLidUser('99999:1@hosted.lid'));
+console.log('hostedIsNotLid=' + !isLidUser('99999:1@hosted.lid'));
+const { outcome, sent } = await chatstateFor(ME, '99999:1@hosted.lid');
+console.log('outcome=' + outcome);
+console.log('sent=' + JSON.stringify(sent));
+process.exit(0);
+`);
+	assert.equal(code, 0, stderr);
+	assert.match(stdout, /hostedIsLid=true/, 'fixture assumption');
+	assert.match(stdout, /hostedIsNotLid=true/, 'fixture assumption');
+	// old: server === 'lid' is false here, so this went out from the PN
+	assert.match(stdout, /sent=\["<chatstate from='11111:1@lid'/);
 });
 
 test('a chatstate to a PN peer is sent from the PN identity', async () => {
-	const h = await chatsAnswering(ME);
-	try {
-		h.clear();
-		await h.sock.sendPresenceUpdate('composing', '99999:1@s.whatsapp.net');
-		assert.match(h.sent()[0], /from='11111:1@s\.whatsapp\.net'/);
-	}
-	finally {
-		await h.close();
-	}
+	const { code, stdout, stderr } = await runScenario(withMe('ME', '99999:1@s.whatsapp.net'));
+	assert.equal(code, 0, stderr);
+	assert.match(stdout, /sent=\["<chatstate from='11111:1@s\.whatsapp\.net'/);
 });
 
 test('a chatstate sent before the server gave us a lid still carries a from', async () => {
-	const h = await chatsAnswering({ id: '11111:1@s.whatsapp.net', name: 'probe' });
-	try {
-		h.clear();
-		await h.sock.sendPresenceUpdate('composing', '99999:1@lid');
-		assert.equal(h.sent().length, 1, 'no chatstate reached the wire');
-		// old: from: me.lid === undefined, which the trace filter and the encoder
-		// both drop, leaving a chatstate with no from at all
-		assert.match(h.sent()[0], /from='11111:1@s\.whatsapp\.net'/);
-	}
-	finally {
-		await h.close();
-	}
+	const { code, stdout, stderr } = await runScenario(
+		withMe("{ id: '11111:1@s.whatsapp.net', name: 'probe' }", '99999:1@lid')
+	);
+	assert.equal(code, 0, stderr);
+	// old: from: me.lid === undefined, which the trace filter and the encoder
+	// both drop, leaving a chatstate with no from at all
+	assert.match(stdout, /sent=\["<chatstate from='11111:1@s\.whatsapp\.net'/);
 });
 
 test('an available presence before pairing is a warning, not a TypeError', async () => {
-	const h = await chatsAnswering(undefined);
-	try {
-		h.clear();
-		let outcome = 'resolved';
-		await h.sock.sendPresenceUpdate('available').then(
-			() => { outcome = 'resolved'; },
-			e => { outcome = 'rejected ' + e?.name; }
-		);
-		assert.equal(outcome, 'resolved', 'creds.me is undefined until the device pairs');
-		assert.equal(h.sent().filter(x => x.includes('<presence')).length, 0,
-			'a presence with no name must not be sent');
-	}
-	finally {
-		await h.close();
-	}
+	const { code, stdout, stderr } = await runScenario(`
+${BUILDER}
+const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+await new Promise(res => wss.once('listening', res));
+const logger = noopLogger();
+logger.level = 'trace';
+const sock = makeChatsSocket({
+	...DEFAULT_CONNECTION_CONFIG,
+	waWebSocketUrl: 'ws://127.0.0.1:' + wss.address().port + '/ws/chat',
+	logger,
+	connectTimeoutMs: 600000,
+	defaultQueryTimeoutMs: 600000,
+	auth: { creds: credsWith(undefined), keys },
+	makeSignalRepository: signalRepo,
+	fireInitQueries: false
+});
+await new Promise(res => {
+	if (sock.ws.isOpen) { return res(); }
+	sock.ws.once('open', res);
+});
+await tick(50);
+logger.logs.length = 0;
+const outcome = await sock.sendPresenceUpdate('available').then(() => 'resolved', e => 'rejected ' + e?.name);
+const sent = logger.logs.filter(l => l[1]?.msg === 'xml send').map(l => String(l[1]?.xml));
+console.log('outcome=' + outcome);
+console.log('sent=' + JSON.stringify(sent));
+await sock.end(new Error('test teardown'));
+await new Promise(res => wss.close(res));
+process.exit(0);
+`);
+	assert.equal(code, 0, stderr);
+	assert.match(stdout, /outcome=resolved/, 'creds.me is undefined until the device pairs');
+	assert.match(stdout, /sent=\[\]/, 'a presence with no name must not be sent');
 });
 
 test('a composing presence before pairing is a warning, not a TypeError', async () => {
-	const h = await chatsAnswering(undefined);
-	try {
-		h.clear();
-		let outcome = 'resolved';
-		await h.sock.sendPresenceUpdate('composing', '99999:1@s.whatsapp.net').then(
-			() => { outcome = 'resolved'; },
-			e => { outcome = 'rejected ' + e?.name; }
-		);
-		assert.equal(outcome, 'resolved', 'creds.me is undefined until the device pairs');
-		assert.equal(h.sent().filter(x => x.includes('<chatstate')).length, 0,
-			'a chatstate with no own identity must not be sent');
-	}
-	finally {
-		await h.close();
-	}
+	const { code, stdout, stderr } = await runScenario(`
+${BUILDER}
+const wss = new WebSocketServer({ host: '127.0.0.1', port: 0 });
+await new Promise(res => wss.once('listening', res));
+const logger = noopLogger();
+logger.level = 'trace';
+const sock = makeChatsSocket({
+	...DEFAULT_CONNECTION_CONFIG,
+	waWebSocketUrl: 'ws://127.0.0.1:' + wss.address().port + '/ws/chat',
+	logger,
+	connectTimeoutMs: 600000,
+	defaultQueryTimeoutMs: 600000,
+	auth: { creds: credsWith(undefined), keys },
+	makeSignalRepository: signalRepo,
+	fireInitQueries: false
+});
+await new Promise(res => {
+	if (sock.ws.isOpen) { return res(); }
+	sock.ws.once('open', res);
+});
+await tick(50);
+logger.logs.length = 0;
+const outcome = await sock.sendPresenceUpdate('composing', '99999:1@s.whatsapp.net').then(() => 'resolved', e => 'rejected ' + e?.name);
+const sent = logger.logs.filter(l => l[1]?.msg === 'xml send').map(l => String(l[1]?.xml));
+console.log('outcome=' + outcome);
+console.log('sent=' + JSON.stringify(sent));
+await sock.end(new Error('test teardown'));
+await new Promise(res => wss.close(res));
+process.exit(0);
+`);
+	assert.equal(code, 0, stderr);
+	assert.match(stdout, /outcome=resolved/, 'creds.me is undefined until the device pairs');
+	assert.doesNotMatch(stdout, /<chatstate/, 'a chatstate with no own identity must not be sent');
 });
