@@ -31,6 +31,10 @@ export const ME_LID = '999999:1@lid';
 export const PEER_PN = '628111:1@s.whatsapp.net';
 export const PEER_LID = '777777:1@lid';
 export const GROUP_JID = '120363111111111111@g.us';
+/** user-level (device 0 implied) jids, the shape a real group participant list has */
+export const ME_GROUP_JID = '111111@s.whatsapp.net';
+export const PEER_GROUP_JID = '628111@s.whatsapp.net';
+export const PEER_LID_GROUP_JID = '777777@lid';
 
 export const makeCreds = () => ({
 	noiseKey: { private: Buffer.alloc(32), public: Buffer.alloc(32, 1) },
@@ -140,7 +144,10 @@ export const makeSignalRepo = (over = {}) => {
 };
 
 /** Device cache that answers getUSyncDevices without a usync query. */
+export const makeNodeCache = options => new NodeCache(options);
 export const makeDeviceCache = usersToDevices => ({
+	// exposed so a scenario can model a device joining between two sends
+	devices: usersToDevices,
 	async mget(users) { return Object.fromEntries(users.map(u => [u, usersToDevices[u]])); },
 	async mset() { },
 	async get(u) { return usersToDevices[u]; },
@@ -209,9 +216,9 @@ export const groupMetadata = (over = {}) => ({
 	size: 3,
 	owner: ME_PN,
 	participants: [
-		{ id: ME_PN, admin: null },
-		{ id: PEER_PN, admin: null },
-		{ id: PEER_LID, admin: null }
+		{ id: ME_GROUP_JID, admin: null },
+		{ id: PEER_GROUP_JID, admin: null },
+		{ id: PEER_LID_GROUP_JID, admin: null }
 	],
 	ephemeralDuration: 0,
 	...over
