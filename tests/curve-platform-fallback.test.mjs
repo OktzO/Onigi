@@ -12,6 +12,14 @@ import { test } from 'node:test';
 // the static `import * as native from 'oktz-curve25519'` in curve-native.js took
 // the whole library down with it. This file reproduces a prebuild-less install by
 // redirecting the specifier at a copy of the real index.cjs with no .node beside it.
+//
+// That is linux-arm64 (and musl) in the field, and since R7 it is NOT an
+// unsupported platform: oktz-signal -- already a hard dependency, already loaded
+// by lib/Signal/libsignal.js -- publishes signal-linux-{arm64,x64}-{gnu,musl}
+// through optionalDependencies and its curveSign/curveVerify are byte-compatible
+// with oktz-curve25519's. So keygen and DH fall back to node:crypto and XEdDSA
+// delegates to oktz-signal. tests/curve-xeddsa-unsupported.test.mjs covers the
+// one condition that is still unsupported: neither binding has a prebuild.
 
 const realIndex = createRequire(import.meta.url).resolve('oktz-curve25519');
 const staging = mkdtempSync(join(tmpdir(), 'curve-no-prebuild-'));
@@ -26,8 +34,6 @@ module.registerHooks({
         return nextResolve(specifier, context);
     }
 });
-
-const platform = `${process.platform}-${process.arch}`;
 
 test('the reproduction really is a prebuild-less oktz-curve25519', () => {
     assert.throws(
@@ -97,41 +103,51 @@ test('calculateAgreement falls back to node:crypto diffieHellman', async () => {
     assert.ok(!ab.equals(a.privKey.subarray(0, 32)));
 });
 
-test('calculateSignature fails loudly instead of returning a fake signature', async () => {
-    const { generateKeyPair, calculateSignature } = await import('../lib/Modded/curve-native.js');
-    const { privKey } = generateKeyPair();
-    assert.throws(
-        () => calculateSignature(privKey, Buffer.from('loud')),
-        (err) => {
-            assert.ok(err instanceof Error, 'must be a real Error, never a silent value');
-            assert.match(err.message, /XEdDSA/i);
-            assert.ok(err.message.includes(platform), `error must name the platform, got: ${err.message}`);
-            assert.match(err.message, /curve25519/);
-            return true;
-        }
-    );
+/*
+ * The loud-throw guarantee is unchanged and still enforced -- it just moved to
+ * the condition that is actually unsupported. On this platform signing must
+ * work, because oktz-signal can do it.
+ */
+test('calculateSignature signs for real, by delegating to oktz-signal', async () => {
+    const { generateKeyPair, calculateSignature, verifySignature } = await import('../lib/Modded/curve-native.js');
+    const { pubKey, privKey } = generateKeyPair();
+    const message = Buffer.from('loud');
+    const sig = calculateSignature(privKey, message);
+    assert.ok(Buffer.isBuffer(sig), 'must be a real Buffer, never a fake value');
+    assert.equal(sig.byteLength, 64);
+    assert.equal(verifySignature(pubKey, message, sig), true);
 });
 
-test('verifySignature fails loudly instead of returning true', async () => {
-    const { generateKeyPair, verifySignature } = await import('../lib/Modded/curve-native.js');
-    const { pubKey } = generateKeyPair();
-    let outcome = 'returned';
-    try {
-        const value = verifySignature(pubKey, Buffer.from('loud'), Buffer.alloc(64));
-        outcome = `returned ${String(value)}`;
-    } catch (err) {
-        assert.ok(err instanceof Error);
-        assert.match(err.message, /XEdDSA/i);
-        assert.ok(err.message.includes(platform), `error must name the platform, got: ${err.message}`);
-        outcome = 'threw';
-    }
-    assert.equal(outcome, 'threw', 'verifySignature must throw, never return a verdict it cannot compute');
+test('verifySignature returns a real verdict, not a stand-in', async () => {
+    const { generateKeyPair, calculateSignature, verifySignature } = await import('../lib/Modded/curve-native.js');
+    const { pubKey, privKey } = generateKeyPair();
+    const message = Buffer.from('loud');
+    const sig = Buffer.from(calculateSignature(privKey, message));
+    assert.equal(verifySignature(pubKey, message, sig), true, 'a genuine match must be accepted');
+    sig[0] ^= 0x01;
+    assert.equal(verifySignature(pubKey, message, sig), false, 'a forgery must be rejected, never waved through');
 });
 
-test('Curve.verify stays fail-closed when the verifier is unavailable', async () => {
-    const { Curve } = await import('../lib/Utils/crypto.js');
-    const { public: pubKey, private: privKey } = Curve.generateKeyPair();
+test('a signature from a different key is rejected on this platform too', async () => {
+    const { generateKeyPair, calculateSignature, verifySignature } = await import('../lib/Modded/curve-native.js');
+    const a = generateKeyPair();
+    const b = generateKeyPair();
+    const message = Buffer.from('loud');
+    assert.equal(verifySignature(a.pubKey, message, calculateSignature(b.privKey, message)), false);
+});
+
+test('Curve.verify fails closed on a forgery, and pairing works', async () => {
+    const { Curve, signedKeyPair } = await import('../lib/Utils/crypto.js');
+    const { public: pubKey } = Curve.generateKeyPair();
     assert.equal(pubKey.length, 32);
-    assert.equal(Curve.verify(pubKey, Buffer.from('loud'), Buffer.alloc(64)), false);
-    assert.throws(() => Curve.sign(privKey, Buffer.from('loud')), /XEdDSA/);
+    assert.equal(Curve.verify(pubKey, Buffer.from('loud'), Buffer.alloc(64)), false, 'fail-closed, never permissive');
+
+    // pairing signs the 33-byte prekey with the identity key; both halves must work
+    const identity = Curve.generateKeyPair();
+    const { keyPair, signature, keyId } = signedKeyPair(identity, 3);
+    assert.equal(keyId, 3);
+    assert.equal(keyPair.public.length, 32);
+    assert.equal(signature.byteLength, 64);
+    const prefixedPreKey = Buffer.concat([Buffer.from([5]), keyPair.public]);
+    assert.equal(Curve.verify(identity.public, prefixedPreKey, signature), true, 'the prekey must verify against the signing identity');
 });
