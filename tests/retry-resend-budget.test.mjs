@@ -59,7 +59,7 @@ assert.deepEqual(cached.message, { conversation: 'resend me' });
 
 test('8.2 markRetrySuccess runs only after the resend reached the wire', () => one({
 	config: { enableRecentMessageCache: true },
-	signalOverrides: { encryptMessage: async () => { throw new Error('no session'); } }
+	signalOverrides: { encryptMessage: 'no session' }
 }, `
 s.sock.messageRetryManager.addRecentMessage(T.PEER_PN, ${JSON.stringify(MSG_ID)}, { conversation: 'resend me' });
 s.sock.ws.emit('CB:receipt', T.retryReceipt({ id: ${JSON.stringify(MSG_ID)}, participant: T.PEER_PN, count: 1 }));
@@ -77,10 +77,10 @@ assert.equal(
 
 test('8.2 two peer devices each get their resend from the same cached message', () => one(CACHED, `
 s.sock.messageRetryManager.addRecentMessage(T.PEER_PN, ${JSON.stringify(MSG_ID)}, { conversation: 'resend me' });
-s.sock.ws.emit('CB:receipt', T.retryReceipt({ id: ${JSON.stringify(MSG_ID)}, participant: '628111:2@s.whatsapp.net', count: 1 }));
+s.sock.ws.emit('CB:receipt', T.retryReceipt({ id: ${JSON.stringify(MSG_ID)}, from: T.PEER_PN, participant: '628111:2@s.whatsapp.net', count: 1 }));
 await tick(400);
 const afterFirst = s.signal.encryptCalls.length;
-s.sock.ws.emit('CB:receipt', T.retryReceipt({ id: ${JSON.stringify(MSG_ID)}, participant: '628111:3@s.whatsapp.net', count: 1 }));
+s.sock.ws.emit('CB:receipt', T.retryReceipt({ id: ${JSON.stringify(MSG_ID)}, from: T.PEER_PN, participant: '628111:3@s.whatsapp.net', count: 1 }));
 await tick(400);
 assert.ok(
 	s.signal.encryptCalls.length > afterFirst,

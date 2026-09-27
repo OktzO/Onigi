@@ -126,6 +126,14 @@ export const makeSignalRepo = (over = {}) => {
 		decryptCalls
 	};
 	const repo = { ...base, ...over };
+	// JSON.stringify drops functions, and the scenario body is passed as source
+	// text -- so a failing signal method is requested by naming its error.
+	for (const key of Object.keys(over)) {
+		if (typeof over[key] === 'string') {
+			const message = over[key];
+			repo[key] = async () => { throw new Error(message); };
+		}
+	}
 	const innerDecrypt = repo.decryptMessage;
 	repo.decryptMessage = async args => { decryptCalls.push({ jid: args.jid, type: args.type }); return innerDecrypt(args); };
 	return repo;
@@ -185,9 +193,9 @@ export const plaintextStanza = (jid, id, text = 'hello') => ({
 });
 
 /** A peer's retry receipt for a message we sent. */
-export const retryReceipt = ({ id, participant, count, error = '0', bundle = true }) => ({
+export const retryReceipt = ({ id, participant, count, error = '0', bundle = true, from }) => ({
 	tag: 'receipt',
-	attrs: { id, from: participant, participant, t: '1700000000', type: 'retry' },
+	attrs: { id, from: from || participant, participant, t: '1700000000', type: 'retry' },
 	content: [
 		{ tag: 'retry', attrs: { count: String(count), id, t: '1700000000', v: '1', error } },
 		...(bundle ? keyBundle() : [])
