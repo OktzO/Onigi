@@ -154,6 +154,11 @@ export const makeSignalRepo = (over = {}) => {
 		let seq = 0;
 		repo.getSessionInfo = async () => ({ registrationId: 1, baseKey: Buffer.alloc(32, ++seq) });
 	}
+	// Known PN -> LID mappings, as getLIDsForPNs would return them.
+	if (over.lidMappings) {
+		const map = { ...over.lidMappings };
+		repo.lidMapping.getLIDsForPNs = async pns => pns.filter(p => map[p]).map(p => ({ pn: p, lid: map[p] }));
+	}
 	const innerDecrypt = repo.decryptMessage;
 	repo.decryptMessage = async args => { decryptCalls.push({ jid: args.jid, type: args.type }); return innerDecrypt(args); };
 	return repo;
@@ -243,7 +248,7 @@ export const groupMetadata = (over = {}) => ({
 export const bootSocket = async (over = {}) => {
 	const logger = over.logger || makeLogger();
 	const keys = over.keys || makeKeyStore();
-	const signal = over.signal || makeSignalRepo(over.signalOverrides);
+	const signal = over.signal || makeSignalRepo({ ...over.signalOverrides, lidMappings: over.lidMappings });
 	const msgRetryCounterCache = new NodeCache({ maxKeys: 10_000, stdTTL: 600_000, useClones: false });
 	const config = {
 		auth: { creds: makeCreds(), keys },
