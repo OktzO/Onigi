@@ -37,3 +37,35 @@ test('Curve.verify rejects random garbage', () => {
 test('Curve.verify returns false for a malformed public key instead of throwing', () => {
     assert.equal(Curve.verify(Buffer.alloc(5), message, signature), false);
 });
+
+/*
+ * A rejected signature on a platform that *can* verify is a normal outcome and
+ * must stay silent. Only the "this platform cannot verify at all" condition is
+ * worth a loud warning, so pin the negative half here -- on a real native
+ * install, where every rejection below is a genuine verdict.
+ */
+const captureWarnings = async work => {
+	const warnings = [];
+	const listener = warning => warnings.push(warning.message);
+	process.on('warning', listener);
+	try {
+		const value = work();
+		await new Promise(resolve => setTimeout(resolve, 20));
+		return { value, warnings };
+	}
+	finally {
+		process.off('warning', listener);
+	}
+};
+
+test('a signature mismatch warns about nothing', async () => {
+	const { value, warnings } = await captureWarnings(() => Curve.verify(pubKey, message, flipLowBit(signature)));
+	assert.equal(value, false);
+	assert.deepEqual(warnings, [], `a bad signature must not be reported as an unsupported platform: ${warnings}`);
+});
+
+test('a malformed public key warns about nothing', async () => {
+	const { value, warnings } = await captureWarnings(() => Curve.verify(Buffer.alloc(5), message, signature));
+	assert.equal(value, false);
+	assert.deepEqual(warnings, []);
+});
