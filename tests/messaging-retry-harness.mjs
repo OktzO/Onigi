@@ -138,6 +138,16 @@ export const makeSignalRepo = (over = {}) => {
 			repo[key] = async () => { throw new Error(message); };
 		}
 	}
+	// A stale session on one device out of several: the per-recipient failure
+	// createParticipantNodes has to survive.
+	if (Array.isArray(over.encryptFailJids)) {
+		const failing = new Set(over.encryptFailJids);
+		repo.encryptMessage = async ({ jid }) => {
+			encryptCalls.push(jid);
+			if (failing.has(jid)) throw new Error('no session');
+			return { type: 'msg', ciphertext: Buffer.from('ciphertext') };
+		};
+	}
 	const innerDecrypt = repo.decryptMessage;
 	repo.decryptMessage = async args => { decryptCalls.push({ jid: args.jid, type: args.type }); return innerDecrypt(args); };
 	return repo;
