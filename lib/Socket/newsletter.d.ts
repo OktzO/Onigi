@@ -161,7 +161,7 @@ export declare const makeNewsletterSocket: (config: SocketConfig) => {
     executeUSyncQuery: (usyncQuery: import("../index.js").USyncQuery) => Promise<import("../index.js").USyncQueryResult | undefined>;
     onWhatsApp: (...phoneNumber: string[]) => Promise<{
         jid: string;
-        exists: boolean;
+        exists: boolean | null;
     }[] | undefined>;
     fetchAccountReachoutTimelock: () => Promise<import("../index.js").ReachoutTimelockState>;
     fetchNewChatMessageCap: () => Promise<import("../index.js").NewChatMessageCapInfo>;

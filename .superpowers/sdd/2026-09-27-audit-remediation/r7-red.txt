@@ -1,0 +1,13 @@
+ok 1 - the reproduction is oktz-curve25519 without a prebuild, with oktz-signal present
+not ok 2 - calculateSignature produces a real signature with no oktz-curve25519 prebuild
+not ok 3 - verifySignature accepts a signature made on a prebuild-less oktz-curve25519
+not ok 4 - verifySignature still rejects a forged signature on that platform
+not ok 5 - Curve.sign/Curve.verify round-trip, so pairing is possible again
+not ok 6 - a signature from a different key is still rejected
+not ok 7 - signedKeyPair works, so pairing is not blocked by a missing prebuild
+not ok 8 - group send signing works: getSignature is Curve.sign over the 33-byte public key
+not ok 9 - a native-install signature is byte-compatible with a prebuild-less one
+not ok 10 - the noise handshake no longer sees a false "invalid certificate"
+# tests 10
+# pass 1
+# fail 9

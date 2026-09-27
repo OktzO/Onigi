@@ -10,6 +10,13 @@ import type { LabelAssociation } from './LabelAssociation.js';
 import type { MessageUpsertType, MessageUserReceiptUpdate, WAMessage, WAMessageKey, WAMessageUpdate } from './Message.js';
 import type { ConnectionState, NewChatMessageCapInfo } from './State.js';
 export type BaileysEventMap = {
+    /**
+     * a consumer event handler threw or rejected. `events` lists the event names
+     * whose delivery ran the failing handler, so one throw can be attributed.
+     * the library only emits this when a listener is attached; otherwise the
+     * failure goes to the logger, because an unlistened 'error' emit throws.
+     */
+    error: Error;
     /** connection state has been updated -- WS closed, opened, connecting etc. */
     'connection.update': Partial<ConnectionState>;
     /** credentials updated -- some metadata, keys or something */
@@ -247,9 +254,13 @@ export type BufferedEventData = {
     };
 };
 export type BaileysEvent = keyof BaileysEventMap;
+/** the 'error' event carries the failure plus the events that triggered it */
+export type BaileysEventErrorListener = (err: Error, events: string[]) => void;
 export interface BaileysEventEmitter {
     on<T extends keyof BaileysEventMap>(event: T, listener: (arg: BaileysEventMap[T]) => void): void;
+    on(event: 'error', listener: BaileysEventErrorListener): void;
     off<T extends keyof BaileysEventMap>(event: T, listener: (arg: BaileysEventMap[T]) => void): void;
+    off(event: 'error', listener: BaileysEventErrorListener): void;
     removeAllListeners<T extends keyof BaileysEventMap>(event: T): void;
     emit<T extends keyof BaileysEventMap>(event: T, arg: BaileysEventMap[T]): boolean;
 }
