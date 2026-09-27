@@ -1,5 +1,5 @@
 interface Sender {
-    id: string;
+    name: string;
     deviceId: number;
     toString(): string;
 }

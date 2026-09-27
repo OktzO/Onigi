@@ -7,7 +7,9 @@ import type { ILogger } from './logger.js';
  * this can make processing events extremely efficient -- since everything
  * can be done in a single transaction
  */
-type BaileysEventData = Partial<BaileysEventMap>;
+// 'error' is omitted: it is emitted straight onto the emitter rather than folded
+// into the consolidated batch, so a process() handler never observes it.
+type BaileysEventData = Partial<Omit<BaileysEventMap, 'error'>>;
 type BaileysBufferableEventEmitter = BaileysEventEmitter & {
     /** Use to process events in a batch */
     process(handler: (events: BaileysEventData) => void | Promise<void>): () => void;
