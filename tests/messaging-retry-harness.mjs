@@ -19,9 +19,10 @@ import { promisify } from 'node:util';
 import NodeCache from '@cacheable/node-cache';
 import { proto } from '../WAProto/index.js';
 import { KEY_BUNDLE_TYPE } from '../lib/Defaults/index.js';
+import { jidNormalizedUser } from '../lib/WABinary/index.js';
 import { noopLogger, startHarness, tick } from './helpers/ev-socket-harness.mjs';
 
-export { noopLogger, startHarness, tick };
+export { jidNormalizedUser, noopLogger, startHarness, tick };
 
 const execFileAsync = promisify(execFile);
 const HARNESS_URL = new URL(import.meta.url).href;
