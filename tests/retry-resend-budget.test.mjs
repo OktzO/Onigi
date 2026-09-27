@@ -90,17 +90,23 @@ assert.ok(
 
 test('8.4 an unservable retry request is reported above debug level', () => one({}, `
 s.sock.ws.emit('CB:receipt', T.retryReceipt({ id: 'MSGID-NOT-CACHED', participant: T.PEER_PN, count: 1 }));
-await s.waitForLog('but message not available');
-const noisy = s.logger.find(undefined, 'but message not available');
-assert.equal(noisy.length, 1, 'the failure must be reported once per unservable id, got ' + noisy.length);
-assert.notEqual(noisy[0][0], 'debug', 'a dead-end resend path reported at debug level is invisible in production');
-const text = s.logger.texts().find(t => t.includes('but message not available'));
+await s.waitForLog('MSGID-NOT-CACHED');
+// Wording-independent: the entry has to be about this id *and* about the
+// message being unavailable, whatever the log line happens to say.
+const about = s.logger.logs.filter(l => {
+	const text = l.slice(1).map(a => { try { return JSON.stringify(a); } catch { return String(a); } }).join(' ');
+	return text.includes('MSGID-NOT-CACHED') && text.includes('not available');
+});
+assert.equal(about.length, 1, 'the failure must be reported once per unservable id, got ' + about.length);
+assert.notEqual(about[0][0], 'debug', 'a dead-end resend path reported at debug level is invisible in production');
+const text = about[0].slice(1).map(a => { try { return JSON.stringify(a); } catch { return String(a); } }).join(' ');
 assert.match(text, /enableRecentMessageCache|getMessage/, 'the message must name what to configure');
 `));
 
 test('8.4 an unservable retry request puts nothing on the wire', () => one({}, `
 s.sock.ws.emit('CB:receipt', T.retryReceipt({ id: 'MSGID-NOT-CACHED', participant: T.PEER_PN, count: 1 }));
-await s.waitForLog('but message not available');
+await s.waitForLog('MSGID-NOT-CACHED');
+await tick(200);
 assert.deepEqual(s.signal.encryptCalls, [], 'nothing may be re-sent when the message is not available');
 `));
 
