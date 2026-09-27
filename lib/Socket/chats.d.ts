@@ -117,7 +117,7 @@ export declare const makeChatsSocket: (config: SocketConfig) => {
     executeUSyncQuery: (usyncQuery: USyncQuery) => Promise<import("../WAUSync/index.js").USyncQueryResult | undefined>;
     onWhatsApp: (...phoneNumber: string[]) => Promise<{
         jid: string;
-        exists: boolean;
+        exists: boolean | null;
     }[] | undefined>;
     fetchAccountReachoutTimelock: () => Promise<import("../Types/index.js").ReachoutTimelockState>;
     fetchNewChatMessageCap: () => Promise<import("../Types/index.js").NewChatMessageCapInfo>;
