@@ -82,7 +82,7 @@ test('a correctly ordered pair is still stored and round-trips', async () => {
     await store.storeLIDPNMappings([{ lid: LID_JID, pn: PN_JID }]);
     assert.equal(keys.data[PN_USER], LID_USER);
     assert.equal(keys.data[`${LID_USER}_reverse`], PN_USER);
-    assert.equal(await store.getPNForLID(LID_JID), `${PN_USER}:0@s.whatsapp.net`);
+    assert.equal(await store.getPNForLID(LID_JID), PN_JID); // device 0 carries no :0 suffix, as in getLIDsForPNs
     assert.equal(await store.getLIDForPN(PN_JID), `${LID_USER}@lid`);
 });
 
@@ -90,7 +90,7 @@ test('a correctly ordered pair survives a store/lookup round trip', async () => 
     const { keys, store } = makeStore();
     await store.storeLIDPNMappings([{ lid: LID_JID, pn: PN_JID }]);
     const reopened = new LIDMappingStore(keys, makeLogger(), async () => null);
-    assert.equal(await reopened.getPNForLID(LID_JID), `${PN_USER}:0@s.whatsapp.net`);
+    assert.equal(await reopened.getPNForLID(LID_JID), PN_JID); // device 0 carries no :0 suffix, as in getLIDsForPNs
 });
 
 test('a batch containing one reversed pair persists only the valid pair', async () => {
