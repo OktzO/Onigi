@@ -103,6 +103,43 @@ test('calculateAgreement falls back to node:crypto diffieHellman', async () => {
     assert.ok(!ab.equals(a.privKey.subarray(0, 32)));
 });
 
+test('the DH fallback is byte-exact against the native path over many random pairs', async () => {
+    // on this platform calculateAgreement runs the node:crypto fallback (no
+    // oktz-curve25519 prebuild). It must produce the same 32 bytes the native
+    // module produces, or peers would disagree on the shared secret.
+    const nodeCrypto = await import('node:crypto');
+    // realIndex is the real module's absolute path, captured before the hook was
+    // registered; loading it by path dodges the stripped specifier, and its own
+    // relative require of the .node is not intercepted
+    const oktzCurve = createRequire(import.meta.url)(realIndex);
+    const { generateKeyPair, calculateAgreement } = await import('../lib/Modded/curve-native.js');
+    const b64u = (buf) => Buffer.from(buf).toString('base64url');
+    const pubJwk = (kp) => ({ kty: 'OKP', crv: 'X25519', x: b64u(kp.pubKey.subarray(1)) });
+    const privJwk = (kp) => ({ ...pubJwk(kp), d: b64u(kp.privKey) });
+    for (let i = 0; i < 100; i++) {
+        const a = generateKeyPair();
+        const b = generateKeyPair();
+        const expected = Buffer.from(oktzCurve.sharedKey(a.privKey, b.pubKey.subarray(1)));
+        const actual = Buffer.from(calculateAgreement(b.pubKey, a.privKey));
+        assert.equal(actual.length, 32);
+        assert.ok(actual.equals(expected), `the node:crypto fallback must be byte-exact (i=${i})`);
+        // and it must match what node:crypto derives from the same JWK material
+        const viaNode = Buffer.from(nodeCrypto.diffieHellman({
+            privateKey: nodeCrypto.createPrivateKey({ format: 'jwk', key: privJwk(a) }),
+            publicKey: nodeCrypto.createPublicKey({ format: 'jwk', key: pubJwk(b) })
+        }));
+        assert.ok(actual.equals(viaNode), `the fallback must agree with node:crypto (i=${i})`);
+    }
+});
+
+test('the DH fallback rejects the same malformed keys the native path does', async () => {
+    const { generateKeyPair, calculateAgreement } = await import('../lib/Modded/curve-native.js');
+    const { privKey } = generateKeyPair();
+    for (const [label, bad] of [['undefined', undefined], ['null', null], ['string', 'nope'], ['5 bytes', Buffer.alloc(5)]]) {
+        assert.throws(() => calculateAgreement(bad, privKey), err => err instanceof Error, `${label} public key must be rejected`);
+    }
+});
+
 /*
  * The loud-throw guarantee is unchanged and still enforced -- it just moved to
  * the condition that is actually unsupported. On this platform signing must
