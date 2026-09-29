@@ -40,7 +40,6 @@ import {
 	hkdf,
 	sha256
 } from '../../lib/Utils/crypto.js';
-import { decodeBinaryNode } from '../../lib/WABinary/index.js';
 import { proto } from '../../WAProto/index.js';
 import { NOISE_MODE } from '../../lib/Defaults/index.js';
 
@@ -70,7 +69,7 @@ const readFrames = (buffer, onFrame) => {
  * The server half of `Noise_XX_25519_AESGCM_SHA256`, mirroring
  * lib/Utils/noise-handler.js step for step so the key schedules agree.
  */
-export class LocalNoiseServer {
+class LocalNoiseServer {
 	constructor() {
 		this.hash = Buffer.from(NOISE_MODE);
 		this.salt = this.hash;

@@ -17,8 +17,6 @@
  */
 
 import assert from 'node:assert/strict';
-import { Boom } from '@hapi/boom';
-import { WebSocketServer } from 'ws';
 import makeWASocket, { DEFAULT_CONNECTION_CONFIG, jidDecode, proto } from '../lib/index.js';
 import { NOISE_WA_HEADER } from '../lib/Defaults/index.js';
 import { startLocalWaServer } from './helpers/local-wa-server.mjs';

@@ -26,9 +26,8 @@ import { execFile } from 'node:child_process';
 import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-// pathToFileURL is used for the import rewrite below
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
