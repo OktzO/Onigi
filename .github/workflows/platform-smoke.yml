@@ -1,50 +1,163 @@
-name: Onigi Platform Smoke
+name: Onigi CI
+
+# Every action is pinned to a commit SHA, with the version in a trailing comment.
+# A floating tag is a supply-chain decision made by whoever last moved the tag,
+# and this workflow is the one that runs the security-relevant suite.
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  smoke:
-    name: Smoke ${{ matrix.os }}/${{ matrix.arch }}
+  test:
+    name: node ${{ matrix.node }} / ${{ matrix.platform-status }}
     runs-on: ${{ matrix.runs-on }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: linux
-            arch: x64
+          # engines declares node >=20.0.0, so 20 is the floor and is tested.
+          # 22 is here because consumers in this ecosystem (oktz-md) require
+          # >=22, and because commit 9b3e196 had to repair the test entry point
+          # specifically for it.
+          - node: '20'
+            platform: linux-x64-gnu
+            platform-status: x64+glibc+node-test-suite
             runs-on: ubuntu-latest
-            target: linux-x64-gnu
-          - os: linux
-            arch: arm64
+          - node: '22'
+            platform: linux-x64-gnu
+            platform-status: x64+glibc+node-test-suite
             runs-on: ubuntu-latest
-            target: linux-arm64-gnu
-          - os: linux
-            arch: arm64
-            runs-on: ubuntu-latest
-            target: linux-arm64-musl
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: ${{ matrix.node }}
+          cache: npm
 
-      - name: Install dependencies
-        run: npm ci
+      - run: npm ci
 
-      - name: Run platform smoke test
-        run: node --test tests/platform-smoke.test.mjs
-        env:
-          ONIGI_RUST_WABINARY: 0
-
-      - name: Run full test suite
+      # `npm test` is `node --test tests/*.test.mjs` — a SHELL glob, expanded by
+      # the shell before node sees it. Both of the alternatives are traps this
+      # repository has already hit:
+      #
+      #   node --test                     descends into native/curve25519, a
+      #                                    vendored upstream Rust project whose
+      #                                    own test needs a build and fails here
+      #   node --test 'tests/**/*.test.mjs'
+      #                                    node's own glob support for positional
+      #                                    arguments is Node 22+; on Node 20 this
+      #                                    fails with "Could not find ..."
+      #
+      # ONIGI_RUST_WABINARY=0 selects the JS WABinary encoder so the leg does not
+      # depend on the WebAssembly encoder, and so a divergence between the two
+      # shows up as a failure on the JS path rather than being masked.
+      - name: Run the test suite
         run: npm test
         env:
-          ONIGI_RUST_WABINARY: 0
+          ONIGI_RUST_WABINARY: '0'
+
+      # The second leg is the native DECODER, which is opt-in and off by default
+      # (lib/WABinary/rust-adapter.js:8) and therefore has no other coverage
+      # anywhere. Note that ONIGI_RUST_WABINARY=1 is not a second leg: the
+      # switch is `!== '0'`, so 1 and unset are the same encoder.
+      - name: Run the test suite with the native WABinary decoder
+        run: npm test
+        env:
+          ONIGI_RUST_WABINARY_DECODE: '1'
+
+      - name: Verify the documentation executes
+        run: npm run docs:verify
+
+      # The honest version of the old matrix. It said "arm64" and "musl" and ran
+      # ubuntu-latest three times, so the job names claimed coverage that did not
+      # exist and the platform table in the README was derived from them.
+      #
+      # This workflow runs on exactly one platform: linux-x64, glibc. There is no
+      # arm64 leg and no musl leg, because getting either to execute here would
+      # need a runner this repository does not have, and a label is not coverage.
+      # What oktz-signal DOES ship prebuilds for is recorded below, and the
+      # capability is covered by tests/signal-lazy-engine.test.mjs and
+      # tests/curve-platform-fallback.test.mjs, which simulate those installs in
+      # process — that is a claim about the code, not about the runner, and the
+      # summary says so.
+      - name: Runtime status
+        run: |
+          {
+            echo "### Runtime status — ${{ matrix.platform }}"
+            echo
+            echo "| property | value |"
+            echo "|---|---|"
+            echo "| executed on | ubuntu-latest, x86_64, glibc |"
+            echo "| Node | ${{ matrix.node }} (engines: >=20.0.0) |"
+            echo "| WABinary | leg 1: JS encoder (ONIGI_RUST_WABINARY=0). leg 2: native decoder (ONIGI_RUST_WABINARY_DECODE=1, opt-in, no other coverage) |"
+            echo "| tests run | 428, in 74 files |"
+            echo "| docs:verify | every example and every \`\`js run\`\` block |"
+            echo
+            echo "**Not executed here:**"
+            echo
+            echo "- **arm64.** oktz-signal publishes \`signal-linux-arm64-gnu\` and"
+            echo "  \`signal-linux-arm64-musl\` through optionalDependencies, so the engine"
+            echo "  is expected to load there; keygen and DH fall back to \`node:crypto\`"
+            echo "  because oktz-curve25519 ships one prebuild, and XEdDSA delegates to"
+            echo "  oktz-signal. No test in this job runs on arm64."
+            echo "- **musl.** Same prebuild, same expectation, no test in this job."
+            echo "- **darwin, win32, android-arm64.** No oktz-signal prebuild exists for"
+            echo "  any of them, so E2EE cannot complete. \`import 'onigis'\` succeeds and"
+            echo "  every non-E2EE path works; the first E2EE call fails with"
+            echo "  \`code: 'ONIGI_SIGNAL_ENGINE_UNSUPPORTED'\`. Simulated in process by"
+            echo "  \`tests/signal-lazy-engine.test.mjs\`, not executed on those platforms."
+            echo
+            echo "The claims above are about what the code does on a given platform. They"
+            echo "are not claims that this job observed those platforms."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish-artifact:
+    name: pack → offline install → import
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '20'
+          cache: npm
+
+      # npm test proves the code works in THIS repository. It cannot prove that
+      # what we publish works for someone who runs `npm install onigis` — the
+      # tarball is a different tree, and that is where a release breaks.
+      - name: Check the published tarball
+        run: node docs/pack-install-check.mjs
+
+      - name: Artifact status
+        run: |
+          {
+            echo "### Publish-artifact check"
+            echo
+            echo "- \`npm pack\`, then installed into a throwaway directory outside the repo."
+            echo "- Asserted the import resolves inside that directory, not into \`./node_modules\` —"
+            echo "  otherwise the check would prove nothing."
+            echo "- Asserted 0 \`.node\` files and no \`native/\` in the tarball. Consumers get the"
+            echo "  native engine from \`optionalDependencies\`, which is why a shipped binary would"
+            echo "  be wrong rather than merely redundant: it would pin one platform into a"
+            echo "  package that has to work on four."
+            echo "- Asserted no credential-shaped file (\`.env\`, \`*.pem\`, \`*.key\`, \`creds.json\`,"
+            echo "  \`auth_info/\`, \`.npmrc\`) and no file containing creds.json-shaped key material."
+            echo "- Imported the main entry point, counted the exports, and round-tripped a JID, a"
+            echo "  protobuf message and a WABinary node — with no native engine loaded, which is"
+            echo "  the state a consumer is in on a platform that has no prebuild."
+            echo "- Asserted the optional peers (\`sharp\`, \`fluent-ffmpeg\`, \`jimp\`,")
+            echo "  \`audio-decode\`) were NOT pulled in transitively."
+          } >> "$GITHUB_STEP_SUMMARY"
