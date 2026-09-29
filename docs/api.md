@@ -180,6 +180,12 @@ same as "not an admin" and is reported that way
 `prependListener`, and no `setMaxListeners`. A one-shot listener is `on` plus
 `off`.
 
+There is also no `sock.ev.lastDisconnect`. The disconnect reason arrives on the
+`connection.update` payload itself, as `lastDisconnect: { error, date }`, where
+`error` is a `@hapi/boom` `Boom` and the status code is at
+`error.output.statusCode`. This is checked against a real socket built by
+`tests/helpers/ev-socket-harness.mjs`, not inferred.
+
 The full map, with payload shapes, is `lib/Types/Events.d.ts`
 (`BaileysEventMap`). The names:
 

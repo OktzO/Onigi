@@ -44,16 +44,17 @@ the library requires. Any store with `get`, `set`, `del` and `transaction` works
 like:
 
 ```js illustrative
-sock.ev.on('connection.update', ({ connection, qr }) => {
+let lastDisconnect;                       // there is no sock.ev.lastDisconnect
+sock.ev.on('connection.update', ({ connection, qr, lastDisconnect: ld }) => {
   if (qr) {
-    console.log('scan this QR:\n', qr);   // feed it to any qr terminal renderer
+    console.log('scan this QR:\n', qr);            // feed it to any qr terminal renderer
   } else if (connection === 'close') {
-    const { error } = sock.ev.lastDisconnect ?? {};
-    const status = error?.output?.statusCode;
+    lastDisconnect = ld;                          // { error, date }
+    const status = ld?.error?.output?.statusCode;
     if (status === DisconnectReason.loggedOut) {
       console.log('this device was unlinked — delete auth_info and pair again');
     } else {
-      console.log('connection closed, reconnecting:', error?.message);
+      console.log('connection closed, reconnecting:', ld?.error?.message);
     }
   }
 });

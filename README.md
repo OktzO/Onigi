@@ -1,333 +1,465 @@
 <div align="center">
 
-# Onigi-Baileys
+# onigis
 
-**Lightweight WhatsApp Bot library — fully rebased onto `@whiskeysockets/baileys` 7.0.0-rc14**
+**A WhatsApp multi-device library, forked from `@whiskeysockets/baileys` 7.0.0-rc14, with the E2EE engine swapped to MIT-licensed native Rust.**
 
-[![Version](https://img.shields.io/badge/npm-10.0.2-25D366?style=for-the-badge&logo=whatsapp&logoColor=white)](https://www.npmjs.com/package/onigis)
-[![Node](https://img.shields.io/badge/Node.js-%3E%3D20.0.0-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
-[![Baileys](https://img.shields.io/badge/Base-Baileys%207.0.0--rc14-blue?style=for-the-badge)](https://github.com/WhiskeySockets/Baileys)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
+[![npm](https://img.shields.io/badge/npm-10.1.0--rc.6-25D366?style=flat-square&logo=npm)](https://www.npmjs.com/package/onigis)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-339933?style=flat-square&logo=nodemon)](https://nodejs.org)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![tests](https://img.shields.io/badge/tests-428%20pass-informational?style=flat-square)](#testing)
 
-**[Baca dalam Bahasa Indonesia → README.id.md](README.id.md)**
+**[Bahasa Indonesia → README.id.md](README.id.md)**
 
 </div>
 
-A WhatsApp Multi-Device library rebased onto Baileys v7 rc14, with the E2EE Signal Protocol engine swapped to the **MIT-licensed** `oktz-signal` + `oktz-curve25519` (native Rust) instead of `libsignal` (GPL-3.0).
-
-Project focus: **multimedia WhatsApp bots** — audio, video, image and sticker pipelines, plus **Rich WebUI** (inline HTML interfaces rendered inside chat bubbles), with RAM-friendly defaults.
-
 ---
 
-## Highlights
+## What this is
 
-- **Full Baileys 7.0.0-rc14 parity** — complete TC-token implementation (trusted contact tokens with expiry & re-issue), Signal Repository API v7 (`getSessionInfo`, `hasSenderKey`, `getSenderKeyDistributionMessage`), new QR/pairing format, reachout timelock handling.
-- **MIT E2EE** — no GPL `libsignal` dependency; native Rust crypto backend via `oktz-signal`.
-- **Centralized multimedia pipeline** — `media-processor` utilities (ffmpeg/sharp/audio-decode, lazy-loaded).
-- **Rich WebUI** — render HTML/CSS/JS interfaces directly inside chat bubbles via `sendInlineWebUI`.
-- **RAM-friendly by default** — `syncFullHistory: false`, `enableRecentMessageCache: false`, moderate cache TTLs.
+`onigis` is a fork of [Baileys](https://github.com/WhiskeySockets/Baileys) at
+7.0.0-rc14. The Signal Protocol engine — the part that encrypts your messages —
+is [`oktz-signal`](https://github.com/OktzO/oktz-signal) plus
+`oktz-curve25519`, both MIT-licensed Rust behind NAPI, in place of `libsignal`
+at GPL-3.0. Nothing else about the upstream design was rewritten.
+
+The project focus is multimedia chat bots: audio, video, image and sticker
+pipelines, plus inline HTML interfaces rendered inside a message bubble.
+
+## What this README will not tell you
+
+Three things a README like this usually claims, and this one does not:
+
+- **No performance numbers.** There is no benchmark in this repository. An
+  earlier version of this file published tables — "9× faster than upstream",
+  "186× faster XEdDSA", "+5.7% on WABinary" — with no reproduction script in the
+  tree. They are gone because nothing here can reproduce them, and a number
+  nobody can check is worse than no number.
+- **No claim that a card renders.** Whether a WhatsApp client draws a
+  `buttonsMessage` is Meta's behaviour. No test in this repository can observe
+  it, so it is not asserted anywhere.
+- **No claim of protocol conformance against a live server.** What *is* verified
+  is the arithmetic: that a forged signature is rejected, that a forged
+  ciphertext does not decrypt, that a frame the library emits is a frame its own
+  decoder reads. See [docs/protocol.md](docs/protocol.md) for what that does and
+  does not cover.
 
 ---
 
 ## Requirements
 
-| Requirement | Version |
+| | |
 |---|---|
-| Node.js | >= 20.0.0 |
+| Node.js | `>= 20.0.0` (declared in `engines`; tested on 20 and 22) |
+| Native E2EE | `linux-x64` or `linux-arm64`, glibc or musl |
 
 ### Platform support
 
-| OS / Architecture | Status |
-|---|---|
-| Linux x86_64 (glibc) — Ubuntu, Debian, Fedora, etc. | **Supported** |
-| Linux ARM64 (glibc) | **Experimental** |
-| Linux ARM64 (musl) — Alpine | **Experimental** |
-| Windows x86_64 | **Unsupported** |
-| macOS x86_64 | **Unsupported** |
+The native surface is three packages with **different** coverage. Stating it
+exactly, because getting it wrong is easy in both directions:
 
-> The native modules (`oktz-signal`, `oktz-curve25519`, `whatsapp-rust-bridge`) are currently published for **linux-x64-gnu** only. For other platforms, see the native build guides (`BuildNative-Windows.md`, `BuildNative-macOS.md`, `BuildNative-Linux.md`, `BuildNative-CI-Matrix.md`). Statuses above reflect CI smoke test results (see `.github/workflows/platform-smoke.yml`).
+| package | role | how it ships | platforms |
+|---|---|---|---|
+| `oktz-signal` 0.3.0-rc.1 | E2EE, XEdDSA | `.node` via `optionalDependencies` | `linux-arm64-{gnu,musl}`, `linux-x64-{gnu,musl}` — **four, and no others** |
+| `oktz-curve25519` 0.0.4 | X25519 keygen and DH | one `.node`, no `optionalDependencies` | `linux-x64-gnu` only |
+| `whatsapp-rust-bridge` 0.5.4 | WABinary encode | **WebAssembly**, inlined in `dist/index.js` | any platform with WebAssembly |
+| `node:crypto` | AES-GCM, SHA-256, HMAC, X25519, PBKDF2 | Node built-in | any |
+
+Which gives:
+
+| platform | `import 'onigis'` | non-E2EE surface | E2EE |
+|---|---|---|---|
+| `linux-x64` (glibc) | works | works | works |
+| `linux-arm64` (glibc or musl) | works | works | works |
+| `darwin` (macOS) | works | works | **fails at first E2EE use** |
+| `win32` (Windows) | works | works | **fails at first E2EE use** |
+| `android-arm64` | works | works | **fails at first E2EE use** |
+
+**macOS and Windows are not unsupported platforms — they are platforms without
+an E2EE engine.** Since commit `cb02e9e` the library imports cleanly there, and
+everything that does not encrypt still works: JIDs, WABinary encode and decode,
+the whole protobuf surface, group metadata, and all the message builders. The
+failure arrives at the first E2EE call, as a typed error:
+
+```js illustrative
+try {
+  await sock.sendMessage(jid, { text: 'hi' }, { messageId });
+} catch (error) {
+  if (error.code === 'ONIGI_SIGNAL_ENGINE_UNSUPPORTED') {
+    // name: 'SignalEngineUnavailableError'
+    // message names the platform, the engine, and the package to install
+    // cause: the loader's own error
+  }
+}
+```
+
+**Classify on `code`, never on the message text.** The message is written for a
+human and will be reworded. There is a second, narrower code,
+`ONIGI_XEDDSA_UNSUPPORTED`, meaning neither binding has a prebuild and XEdDSA
+sign *and* verify are both unavailable; `Curve.verify` then answers `false` and
+warns once, which is fail-closed and correct but does mean a Noise handshake
+cannot complete.
+
+`tests/signal-lazy-engine.test.mjs` reproduces a darwin/win32 install exactly and
+asserts all of the above, including that a missing engine is never reported as a
+missing session or a missing identity key.
+
+**What CI actually executes** is stated in every job summary: the suite runs on
+`ubuntu-latest` (x64, glibc), on Node 20 and Node 22. **No CI job runs on arm64
+and none runs against musl.** The arm64 and musl rows in the matrix exist to
+make that gap visible in the report, not to claim coverage.
 
 ---
 
-## Installation
+## Install
 
 ```bash
 npm install onigis
 ```
 
-### Platform install verification
+`oktz-signal` is a pre-release. On the registry `0.3.0-rc.1` sits under the `rc`
+dist-tag; `latest` still points at `0.1.7`. If npm resolves `0.1.7`, install the
+version explicitly.
 
-Setelah install, verifikasi native dependencies load di platform ini:
+### Optional dependencies
+
+Four features need a package that is not a dependency of this one. They are
+optional peers, each loaded with a dynamic `import()` inside a `try`, so a
+process that never touches a feature never loads it.
+
+| package | unlocks | without it |
+|---|---|---|
+| `sharp` | `resizeImage`, `getVideoThumbnail` | `Error: Package "sharp" … npm install sharp` |
+| `fluent-ffmpeg` | `convertToWhatsAppVideo`, `convertToOpusAudio`, `getVideoThumbnail` | `Error: … npm install fluent-ffmpeg` |
+| `jimp` | alternative thumbnails | — |
+| `audio-decode` | voice-note waveform (`ptt: true`) | — |
+| `link-preview-js` | link previews | — |
+
+`fluent-ffmpeg` also needs `ffmpeg` and `ffprobe` on `PATH`; the package alone
+is not enough. `music-metadata` is a hard dependency, so `probeMedia` always
+works.
+
+Check what actually loaded on your machine:
 
 ```bash
-# Verifikasi native production dependencies (full gate)
-node --test tests/platform-smoke.test.mjs
-
-# Quick check per dependency
-node -e "import('oktz-signal').then(({ native }) => console.log(typeof native.ratchetEncrypt))"
-node -e "console.log(typeof require('oktz-curve25519').sign)"
-node -e "import('whatsapp-rust-bridge').then(({ expandAppStateKeys }) => console.log(typeof expandAppStateKeys))"
+node -e "import('oktz-signal').then(m => console.log('signal:', typeof m.native.ratchetEncrypt))"
+node -e "import('oktz-curve25519').then(m => console.log('curve:', typeof m.sign))"
+node -e "import('whatsapp-rust-bridge').then(m => console.log('wabinary:', typeof m.expandAppStateKeys))"
 ```
 
-Semua command harus mengeluarkan `function`. Gagal = native binary tidak cocok platform atau gagal load.
-
-### Optional dependencies (install per feature)
-
-| Package | Feature |
-|---|---|
-| `audio-decode` | Voice note waveform (`ptt: true`) — **required for voice notes** |
-| `sharp` | Image resize/compression |
-| `fluent-ffmpeg` | Video/audio conversion, video thumbnails |
-| `jimp` | Alternative thumbnails (without sharp) |
-| `link-preview-js` | Link previews |
+`function` from all three means the native surface is present. The first two are
+`.node`; the third is WebAssembly and works anywhere.
 
 ---
 
-## Quick Start
+## Quick start
 
-```js
-import makeWASocket, { useMultiFileAuthState } from 'onigis';
+```js illustrative
+import makeWASocket, { useMultiFileAuthState, DisconnectReason } from 'onigis';
 
 const { state, saveCreds } = await useMultiFileAuthState('auth_info');
 
-const sock = makeWASocket({
-  auth: state,
-  printQRInTerminal: true
-});
+const sock = makeWASocket({ auth: state });
 
 sock.ev.on('creds.update', saveCreds);
 
+// There is no sock.ev.lastDisconnect: the reason arrives on the event itself.
+sock.ev.on('connection.update', ({ connection, qr, lastDisconnect }) => {
+  if (qr) {
+    console.log(qr);            // render this however you like
+  } else if (connection === 'close') {
+    const status = lastDisconnect?.error?.output?.statusCode;
+    console.log(status === DisconnectReason.loggedOut
+      ? 'unlinked — delete auth_info and pair again'
+      : 'reconnecting');
+  }
+});
+
 sock.ev.on('messages.upsert', async ({ messages }) => {
-  const msg = messages[0];
-  if (!msg.message || msg.key.fromMe) return;
-
-  const jid = msg.key.remoteJid;
-  const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-
-  if (text === '!ping') {
-    await sock.sendMessage(jid, { text: 'pong' }, { quoted: msg });
+  for (const msg of messages) {
+    if (!msg.message || msg.key.fromMe) continue;
+    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+    if (text === '!ping') {
+      await sock.sendMessage(msg.key.remoteJid, { text: 'pong' }, { quoted: msg });
+    }
   }
 });
 ```
 
----
+`sock.user` is `creds.me` and has `.id`. There is no `sock.user.jid` in this
+library; code that reads it gets `undefined` and stamps a null participant onto
+group messages. Use `normalizeUserJid(sock)`, which accepts a jid, a sock, or a
+user object.
 
-## Examples: Multimedia
+`sock.ev` is not a Node `EventEmitter` — it has `on`, `off`,
+`removeAllListeners` and `emit`, and no `once`.
 
-### Send an image with caption
-
-```js
-await sock.sendMessage(jid, {
-  image: { url: 'https://example.com/photo.jpg' },
-  caption: 'Hello!'
-});
-```
-
-### Send a voice note (PTT)
-
-```js
-// requires: npm install audio-decode
-await sock.sendMessage(jid, {
-  audio: { url: './voice.ogg' },
-  mimetype: 'audio/ogg; codecs=opus',
-  ptt: true
-});
-```
-
-### Convert video/audio before sending (media-processor)
-
-```js
-import { convertToWhatsAppVideo, convertToOpusAudio, getVideoThumbnail, resizeImage } from 'onigis';
-
-// Any video -> WhatsApp-compatible MP4/H.264 (requires fluent-ffmpeg)
-const mp4 = await convertToWhatsAppVideo(rawBuffer);
-await sock.sendMessage(jid, { video: mp4, caption: 'Converted video' });
-
-// Any audio -> OGG/Opus for voice notes
-const opus = await convertToOpusAudio(audioBuffer);
-
-// Video thumbnail & image resize (requires sharp)
-const thumb = await getVideoThumbnail(mp4, 1);
-const small = await resizeImage(imageBuffer, { width: 300, height: 300 });
-```
-
-### Probe media metadata
-
-```js
-import { probeMedia, getMp4Duration } from 'onigis';
-
-const meta = await probeMedia(buffer, 'audio/mpeg'); // { duration, bitrate, container, codec }
-const dur = getMp4Duration(mp4Buffer); // no ffmpeg needed — parses atoms directly
-```
+Full walkthrough: **[docs/quickstart.md](docs/quickstart.md)**.
 
 ---
 
-## Examples: Rich WebUI (inline HTML in chat bubbles)
+## Try it without a WhatsApp account
 
-Send an HTML/CSS/JS interface that **renders directly inside the message bubble** — great for interactive menus, mini-apps and dashboards:
+Six programs under `examples/` run with no credentials, no network and no account:
 
-```js
-import { sendInlineWebUI } from 'onigis';
-
-const html = `<!DOCTYPE html>
-<html><head><style>body{background:#111b21;color:#fff;font-family:sans-serif;padding:16px}</style></head>
-<body><h2>Bot Menu</h2><button onclick="alert('hi')">Press me</button></body></html>`;
-
-await sendInlineWebUI(sock, jid, html, 'Bot Menu');
-
-// Identity can be overridden (default: Meta AI)
-await sendInlineWebUI(sock, jid, html, 'Bot Menu', {
-  botJid: '12345@bot',
-  forwardOrigin: 'CUSTOM'
-});
+```bash
+node examples/01-connect.mjs           # the Noise handshake, on real bytes
+node examples/02-e2ee-roundtrip.mjs    # X3DH, ratchet, group sender key
+node examples/03-wabinary.mjs          # the wire format, and what it refuses
+node examples/04-rich-messages.mjs     # buttons, lists, inline HTML
+node examples/05-addressing.mjs        # PN / LID / hosted JIDs
+node examples/06-media.mjs             # what works with no optional dependency
 ```
 
-> Note: the HTML primitive name (`GenAIaeacdsnwHtmlPrimitive`) is an obfuscated WhatsApp Web identifier and may change between WA versions. If the WebUI stops rendering, update the identifier from the latest WA Web bundle.
+Or all of them, plus every runnable code block in these docs:
+
+```bash
+npm run docs:verify
+```
+
+`docs:verify` runs each in its own process and fails on any error. A fenced
+````js` block in the documentation that is neither marked `run` nor marked
+`illustrative` also fails the run — the verifier will not execute it and will
+not quietly ignore it either.
+
+### What `examples/01-connect.mjs` actually shows
+
+It boots a real `makeWASocket` against a local WebSocket server that implements
+the server half of `Noise_XX_25519_AESGCM_SHA256`, and it asserts on the bytes
+the client actually writes. The result is a **failure**, and it is the
+interesting one:
+
+```
+clientHello: 36 bytes, ephemeral 32 bytes, re-encodes identically
+client refused the server certificate: "noise intermediate certificate signature invalid"
+```
+
+The key schedule matched in both directions — the client decrypted the server's
+`static` and `payload`, which it could not have done against a server computing
+the schedule differently. What failed is the certificate check, because
+`WA_CERT_DETAILS.PUBLIC_KEY` is WhatsApp's real long-term key and its private half
+is not in this repository.
+
+That refusal is the correct outcome, and the example asserts the exact status
+code and message so that a weakening of `lib/Utils/noise-handler.js:183` fails
+the test. The transport keys are therefore never negotiated in any example, and
+no example claims to show a `sendMessage` over a live transport.
 
 ---
 
-## Examples: Classic buttons & lists (render everywhere, new in 10.0.1)
+## Rich messages
 
-`interactiveMessage` + `nativeFlowMessage` cards are **no longer rendered** on many WhatsApp clients — `relayMessage` succeeds without error but the message silently doesn't appear. The classic `buttonsMessage` and `listMessage` templates render reliably on **every** client (Android/iOS/Web/Desktop).
+`buttonsMessage` and `listMessage` are WhatsApp's own templates. This library
+builds them; whether a given client draws them is not something this repository
+can test or claim.
 
-`onigis@10.0.1` ships ready-made builders in `lib/Utils/rich-classic.js`:
-
-```js
+```js illustrative
 import { buildButtonsMessage, buildListMessage, sendClassicMessage } from 'onigis';
 
-// 1-3 quick-reply buttons (optionally with a location+thumbnail header)
-const buttons = buildButtonsMessage({
-  text: 'Hello Brother — pick an option',
-  footer: '© My Bot',
+await sendClassicMessage(sock, jid, buildButtonsMessage({
+  text: 'Pick an option',
+  footer: '© onigis',
   buttons: [
-    { buttonId: '.owner', buttonText: '🧀 Owner' },
-    { buttonId: '.allmenu', buttonText: '💐 Allmenu' },
-  ],
-  locationMessage: { jpegThumbnail, name: 'My Bot', address: 'v10.0.1' },
-});
+    { buttonId: '.owner', buttonText: 'Owner' },
+    { buttonId: '.menu', buttonText: 'All menu' }
+  ]
+}));
 
-// Scrollable list with sections and rows
-const list = buildListMessage({
-  title: '🍃 Menu — 1271 commands',
-  description: 'Pick a category',
-  buttonText: '🍃 Pilih Kategori',
+await sendClassicMessage(sock, jid, buildListMessage({
+  title: 'Menu',
+  buttonText: 'Open',
   sections: [{
     title: 'Categories',
-    rows: [
-      { title: '🏠 main', description: '19 commands', rowId: '.menucat main' },
-      { title: '🎨 sticker', description: '42 commands', rowId: '.menucat sticker' },
-    ],
-  }],
-});
-
-// Send via relayMessage — userJid is normalized automatically
-// (handles sock.user.id vs the legacy non-existent sock.user.jid)
-await sendClassicMessage(sock, jid, buttons);
-await sendClassicMessage(sock, jid, list);
+    rows: [{ title: 'main', description: '19 commands', rowId: '.menucat main' }]
+  }]
+}));
 ```
 
-Also exports `normalizeUserJid(sockOrUserOrJid)` — `sock.user.jid` never existed in baileys 7.x (`sock.user` is `creds.me`, which has `.id`); this helper accepts any shape and returns a valid jid.
+`relayMessage` re-attaches the `<biz>` stanza node automatically for these
+payloads, unless you already supplied one — without it the server accepts the
+stanza and the client never draws the card, and the send reports success.
 
----
+### Inline HTML in a message bubble
 
-## Default Configuration (RAM-friendly)
+```js illustrative
+import { sendInlineWebUI } from 'onigis';
 
-```js
-const sock = makeWASocket({
-  auth: state,
-  // already frugal by default; override if needed:
-  syncFullHistory: false,          // don't pull full chat history
-  enableRecentMessageCache: false, // don't keep recent messages in RAM
-});
+await sendInlineWebUI(sock, jid,
+  '<!DOCTYPE html><html><body><h2>Menu</h2><button onclick="alert(1)">Go</button></body></html>',
+  'Bot Menu'
+);
 ```
 
----
-
-## Performance (benchmarked vs upstream Baileys)
-
-Measured on Node v20.19.1, Linux x64, in-process loops, realistic message shapes (20 participants, 96–128B buffers). All scripts reproducible; verification: Onigi test suite 31 pass + oktz-signal oracle interop bit-exact vs libsignal v6.
-
-### E2EE Signal Protocol (the engine swap: oktz-signal vs libsignal)
-
-| Scenario | Onigi (oktz-signal, Rust) | Upstream (libsignal, JS) | Winner |
-|---|---:|---:|---|
-| **Full session build** (X3DH + PKMsg enc/dec, random keys) | **3.5 ms** | 31.8 ms | **Onigi 9× faster** |
-| **Steady-state per message** (bidirectional ratchet enc+dec) | **195–330 µs** | 570–695 µs | **Onigi 2–3.5× faster** |
-| XEdDSA sign | 165.6 µs | 30.7 ms | **186× faster** |
-| XEdDSA verify | 138.9 µs | 32.3 ms | **233× faster** |
-| X25519 DH | 330.8 µs | 308.2 µs | ~par (both native) |
-
-> In real terms: every incoming prekey message and every session establishment — the operations that happen when pairing new devices, after reinstalls, and when peers rotate — is 9× cheaper on CPU. On a busy multi-chat bot this is the difference between visible event-loop jank and none.
-
-### WABinary (protobuf-XML binary codec, default rust encode)
-
-| Implementation | µs/op roundtrip | ops/s | vs upstream |
-|---|---:|---:|---|
-| **Onigi — Rust encode (default)** | **146.4** | 6,832 | **+5.7% faster** |
-| Onigi — JS fallback (`ONIGI_RUST_WABINARY=0`) | 155.7 | 6,422 | ~par |
-| Upstream baileys rc14 | 154.7 | 6,465 | baseline |
-| Onigi — Rust decode (`ONIGI_RUST_WABINARY_DECODE=1`, opt-in) | ~255 | ~3,900 | 65% slower — correctly OFF by default |
-
-### Where Onigi is ahead of upstream rc14 (verified in code)
-
-- **TC-token**: full WA Web parity implementation (index persist, merge write, 24h prune, 28-day expiry buckets, re-issue after identity change, 463-recovery, AB props gating) — upstream rc14 has this only partially.
-- **Retry system (whatsmeow-style)**: MessageRetryManager with baseKey collision detection, phone-request scheduling, MAC-error codes — upstream rc14 has none of it.
-- **Anti-spoof protocolMessage**: SELF_ONLY_TYPES dropped from non-self origin (ported from whatsmeow) — security win over upstream.
-- **LTHash soft-recovery** on app-state mismatch (warn + partial state) instead of upstream's hard-fail.
-- **Write-amplification fixes**: device-list debounce flush (5s, single `keys.set`), noise burst-concat, lazy stack-capture in timeouts.
-- **LIDMappingStore** with inflight-coalescing (dedupes concurrent USync lookups); offline node queue capped at 5000.
-- Consistent LID resolution in public-facing flows: `onWhatsApp` accepts `@lid` JIDs and resolves them through `lid-mapping` rather than fabricating a number, and reply/group `participant` is set to a `userJid` consistent with addressing (`creds.me.lid` for LID chats, `creds.me.id` for PN). **Open (Sept 2026 audit, item 9.5):** `onWhatsApp` answers with the *server's* jid rather than the one the caller passed, and a jid it could not resolve looks exactly like one that does not exist — `tests/lid-onwhatsapp-domain.test.mjs` pins the intended contract (`jid` echoed back, `exists: true | false | null`) and is skipped until `lib/Socket/socket.js` implements it.
-
-### Known gaps found in the September 2026 audit (fix-prioritized)
-
-| # | Severity | Issue | Location |
-|---|---|---|---|
-| 1 | CRITICAL (release hygiene) | `package.json` pins `oktz-signal 0.2.0-rc.1` but `node_modules`/lockfile resolve **0.1.7** (`npm ls` → invalid) — shipped version was never tested against this tree | `package.json:38` |
-| 2 | HIGH | oktz-signal session-selection bug (first BTreeMap entry instead of open session) is triggered from `encryptMessage` on every outgoing message when a record holds >1 session (LID migration makes multi-session records *normal*, not edge-case). **Mitigation available wrapper-side**: prune to 1 open session before encrypt | `lib/Signal/libsignal.js:115-124` |
-| 3 | HIGH | `process.nextTick(async …)` in `emitOwnEvents` has **no `.catch()`** — a throwing user message-listener becomes an unhandledRejection (process crash on Node 20 defaults) | `lib/Socket/messages-send.js:1202-1206` |
-| 4 | MEDIUM | `relayMessage` holds the per-account transaction mutex across the entire pipeline including network RTT — all sends fully serialized under load | `lib/Socket/messages-send.js:493-918` |
-| 5 | MEDIUM | `sender-key-memory` written unconditionally per group send (whole map persisted even with no new recipients) | `lib/Socket/messages-send.js:609` |
-| 6 | MEDIUM | WAM telemetry: 831KB of dead constants loaded into the module graph via `export * from './WAM/index.js'` — never used at runtime | `lib/WAM/constants.js` |
-| 7 | MEDIUM | `historyCache` in event-buffer has no hard cap between flushes — large initial syncs hold every key ever seen | `lib/Utils/event-buffer.js:27-79` |
-| 8 | MEDIUM | `+countChild.attrs.value` crashes silently if `<count>` child absent (pre-key-low check dies quietly) | `lib/Socket/messages-recv.js:560-561` |
-
-Memory leak audit result: **essentially clean** — socket cleanup lifecycle closes every cache/timer, keyed mutexes use refcount cleanup, `end()` is idempotent. Remaining LOW items: an 8s `setTimeout` without `unref()`, module-level `fileLocks` Map, and the historyCache gap above.
-
-Test-coverage gap worth noting: **the Signal/E2EE roundtrip path has zero tests** — despite being the component that was swapped entirely. Adding an encrypt→decrypt roundtrip test is the single highest-value test this repo can get.
+The HTML is carried as base64-encoded JSON under the primitive typename
+`GenAIaeacdsnwHtmlPrimitive`, forwarded from Meta AI's jid by default. That
+typename is an obfuscated WhatsApp Web identifier and can change between WhatsApp
+versions; if the interface stops rendering, that constant
+(`WEBUI_PRIMITIVE_TYPENAME`, `lib/Utils/rich-webui.js:15`) is the thing to
+update. Payloads over 64 KiB warn.
 
 ---
 
-## Breaking Changes from 9.x (legacy oktz-baileys)
+## Media
 
-- Base rebased to Baileys **7.0.0-rc14** (no longer ourin-baileys 9.0.21).
-- Removed modules: `lib/VoIP/*` (WebRTC call client), `Modded/message_builder.js`, `Utils/rich-messages.js`, `Socket/dugong.js`, `Utils/sticker-pack.js`.
-  - `rejectCall` remains available (core `messages-recv`).
-  - Replacement for the old rich messages: `rich-webui.js` (`sendInlineWebUI`, `buildWebuiMessage`).
-- **10.0.1:** added `rich-classic.js` (`buildButtonsMessage`, `buildListMessage`, `sendClassicMessage`, `normalizeUserJid`) — `interactiveMessage`/`nativeFlowMessage` cards no longer render on many clients; use the classic templates for maximum compatibility.
-- **10.0.2:** restored the ob9 auto-inject of the `<biz>` stanza node (ported from ourin-baileys 9.0.21) — `relayMessage` now automatically attaches the `biz` interactive node for `buttonsMessage` / `listMessage` / `interactiveMessage`+`nativeFlowMessage` payloads, unless the caller already provides one. Without this node the server accepts the stanza but the receiving client never renders the card (relay succeeds silently, message never appears). This regressed during the rebase to Baileys 7 and was the root cause of invisible button/list menus.
-- Default config changed: `syncFullHistory` and `enableRecentMessageCache` are now `false`.
-- `protobufjs-cli` pinned to `^1.1.3` (peer dependency conflict fix); `link-preview-js` to `^5.0.0` (SSRF advisory fix).
+```js illustrative
+import { convertToWhatsAppVideo, convertToOpusAudio, getVideoThumbnail, resizeImage, probeMedia, getMp4Duration } from 'onigis';
+
+const mp4 = await convertToWhatsAppVideo(buffer);          // needs ffmpeg
+const opus = await convertToOpusAudio(buffer);            // needs ffmpeg
+const thumb = await getVideoThumbnail(mp4, 1);            // needs ffmpeg + sharp
+const small = await resizeImage(imageBuffer, { width: 300, height: 300 });   // needs sharp
+
+const meta = await probeMedia(buffer, 'audio/mpeg');      // always available
+const dur = getMp4Duration(mp4Buffer);                    // always available — parses MP4 atoms directly
+```
+
+`getMp4Duration` needs nothing but `node:buffer`. It walks the `moov`/`mvhd`
+atoms itself. It returns `0` for anything that is not an MP4 by default, because
+it runs on caller-supplied bytes; pass `{ silent: false }` for a thrown error
+naming which guard tripped.
+
+`examples/06-media.mjs` exercises both halves — the dependency-free paths on a
+byte-exact MP4 this repository builds itself, and the optional-dependency
+contract by asserting the exact error text when `sharp` and `ffmpeg` are absent.
+
+---
+
+## Addressing
+
+WhatsApp addresses one person two ways: a phone number (`…@s.whatsapp.net`,
+"PN") and an opaque identifier (`…@lid`). Device 99 lives in a third domain,
+`hosted`; its LID counterpart is `hosted.lid`.
+
+The library treats these as **different domains, not as two names for one
+thing**, and never invents a conversion:
+
+- `isPnUser` / `isLidUser` are domain tests. A LID is not a phone number.
+- `areJidsSameUser(a, b)` compares the user part and refuses any operand that is
+  not a user — a group, broadcast, status or newsletter jid is not a user
+  however its user part reads. It returns `false`, never a guess, when either
+  side names no user.
+- A Signal address is `name.deviceId`, and for a non-PN domain the name is
+  `user_<domainType>`, so a LID address and a PN address cannot collide in the
+  session store.
+- `sendMessage` derives the sender identity from the **chat's** addressing, not
+  from the message type, and stamps that same value into `contextInfo.participant`.
+
+`onWhatsApp(...jids)` answers one entry per input, in input order, with `jid`
+echoed back as the caller spelled it, and a three-way `exists`:
+
+| value | meaning |
+|---|---|
+| `true` | the server returned a contact row |
+| `false` | the server returned a row that is not a contact |
+| `null` | **could not be determined** |
+
+`null` is a real answer, not a lazy `false`. It covers a `@lid` with no
+phone-number mapping, and a row the server never answered. Earlier versions
+returned the server's own jid for every input — so a caller passing a `@lid` got
+a phone number back — and conflated both cases with "not on WhatsApp".
+
+**LID support is not claimed to be complete.** Resolution needs a live usync
+round trip, and whether Meta's servers answer consistently in every case is not
+something this repository can test. `examples/05-addressing.mjs` shows what the
+helpers do with all six jid shapes and then says, in its own output, exactly what
+that does not establish.
+
+Details: [docs/api.md §7](docs/api.md#7-addressing-pn-lid-hosted).
+
+---
+
+## Security notes
+
+Five defects in the 10.1.0-rc.5 line were fixed after the `v10.1.0-rc.6` tag.
+**If you are on a release up to and including `10.1.0-rc.6`, three of them are
+reachable by a remote peer.** They are listed with what each one let an attacker
+do, and with the commit that fixed it, in
+[CHANGELOG.md](CHANGELOG.md#read-this-before-upgrading-from-1010-rc5-or-earlier).
+
+The two that are most often understated:
+
+**Signature verification was a no-op.** `Curve.verify` discarded the boolean
+returned by the native library — which answers `false` on a mismatch rather than
+throwing, unlike the `curve25519-js` it replaced — and hardcoded `return true`.
+Every signature of a plausible shape verified. That made the Noise certificate
+chain and the ADV pairing signature no-ops, so the websocket authenticated
+nothing about the peer. `42d416d`.
+
+**One forged message could brick a conversation.** A `pkmsg` wrapper's
+`identityKey` is not covered by the MAC that the decrypt checks, and
+`auth.keys.transaction` is a per-key mutex rather than a rollback. The identity
+key was persisted *before* the decrypt, so a single unauthenticated `pkmsg` could
+delete an established session and overwrite the stored identity key before the
+MAC ever failed. `9c64fc7`.
+
+**What is not claimed.** This library has no test against a live WhatsApp
+server. That the certificate chain validates correctly against a real one, that
+interoperability holds with the current WhatsApp clients, and that no other
+protocol flaw remains are all outside what anything in this repository can
+establish.
 
 ---
 
 ## Testing
 
 ```bash
-npm test
+npm test              # 428 tests, 74 files
+npm run docs:verify   # every example, every runnable doc block
 ```
 
-Includes unit tests for: JID utils (PN/LID/hosted), Rich WebUI (build + proto encode/decode roundtrip).
+Both run in CI on Node 20 and Node 22.
+
+Two invocation traps this repository has already hit, both of which break CI:
+
+- **Never bare `node --test`.** It descends into `native/curve25519`, a vendored
+  Rust project with its own test suite that needs a build and fails here. It
+  picks up `native/curve25519/tests/platform-loader.test.cjs` as if it were ours.
+- **Never a quoted positional glob**, `node --test 'tests/**/*.test.mjs'`. Node's
+  own glob support for positional arguments is Node 22+; on Node 20 the same
+  command fails with `Could not find 'tests/**/*.test.mjs'`.
+
+`npm test` uses a *shell* glob, which the shell expands before Node sees it, so
+it works on both. That is why the script is written the way it is.
+
+Two environment variables change behaviour:
+
+| variable | effect |
+|---|---|
+| `ONIGI_RUST_WABINARY=0` | use the JS WABinary encoder instead of the native one |
+| `ONIGI_RUST_WABINARY_DECODE=1` | use the native decoder (opt-in; off by default) |
+
+`whatsapp-rust-bridge` is a WebAssembly module with its `dist/index.js` inlining
+the wasm as base64, so the encode path works on any platform with WebAssembly.
+`lib/WABinary/rust-adapter.js:21` routes the two shapes where the native and JS
+encoders diverge — a non-string attribute, and an empty-string attribute — to the
+JS encoder, so the two are never mixed inside one frame.
+
+---
+
+## Documentation
+
+| | |
+|---|---|
+| [docs/quickstart.md](docs/quickstart.md) | connect, send, receive; and the offline path |
+| [docs/api.md](docs/api.md) | the socket's 170 members and the 282 top-level exports, grouped by concern |
+| [docs/protocol.md](docs/protocol.md) | the wire format and the checks, cited to `file:line` |
+| [CHANGELOG.md](CHANGELOG.md) | what changed, and what was wrong |
+| [examples/](examples/) | six runnable programs |
+
+`lib/index.js` exports 282 symbols. `docs/api.md` groups them rather than listing
+each one, because a 282-row table nobody checked is worse than a grouped one with
+a pointer to the `.d.ts`. There are 99 hand-maintained `.d.ts` files and no
+`tsc` in this tree, so they are committed artifacts, not build output;
+`tests/dts-declarations.test.mjs` keeps them honest against the runtime.
 
 ---
 
 ## Credits
 
-- **[KzorArsuy](https://github.com/rozzak2009)** — audit, rc14 rebase, optimization, multimedia & WebUI
-- **[OktzO](https://github.com/OktzO)** — original `oktz-baileys` fork & `oktz-signal`/`oktz-curve25519` engines
-- **[WhiskeySockets/Baileys](https://github.com/WhiskeySockets/Baileys)** — upstream library
-
----
+- **[KzorArsuy](https://github.com/rozzak2009)** — audit, the rc14 rebase, optimisation, multimedia and WebUI
+- **[OktzO](https://github.com/OktzO)** — the original `oktz-baileys` fork, and the `oktz-signal` / `oktz-curve25519` engines
+- **[WhiskeySockets/Baileys](https://github.com/WhiskeySockets/Baileys)** — upstream
 
 ## License
 
-**MIT** — free from the GPL restrictions of `libsignal`.
+MIT.

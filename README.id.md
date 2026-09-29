@@ -1,51 +1,113 @@
 <div align="center">
 
-# Onigi-Baileys
+# onigis
 
-**Library bot WhatsApp ringan — rebase penuh ke `@whiskeysockets/baileys` 7.0.0-rc14**
+**Library WhatsApp multi-device, fork dari `@whiskeysockets/baileys` 7.0.0-rc14, dengan engine E2EE diganti ke Rust native berlisensi MIT.**
 
-[![Version](https://img.shields.io/badge/npm-10.0.2-25D366?style=for-the-badge&logo=whatsapp&logoColor=white)](https://www.npmjs.com/package/onigis)
-[![Node](https://img.shields.io/badge/Node.js-%3E%3D20.0.0-339933?style=for-the-badge&logo=node.js&logoColor=white)](https://nodejs.org)
-[![Baileys](https://img.shields.io/badge/Base-Baileys%207.0.0--rc14-blue?style=for-the-badge)](https://github.com/WhiskeySockets/Baileys)
-[![License](https://img.shields.io/badge/License-MIT-blue?style=for-the-badge)](LICENSE)
+[![npm](https://img.shields.io/badge/npm-10.1.0--rc.6-25D366?style=flat-square&logo=npm)](https://www.npmjs.com/package/onigis)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-339933?style=flat-square&logo=nodemon)](https://nodejs.org)
+[![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
+[![tests](https://img.shields.io/badge/tests-428%20pass-informational?style=flat-square)](#pengujian)
 
-**[Read in English → README.md](README.md)**
+**[English → README.md](README.md)**
 
 </div>
 
-Library WhatsApp Multi-Device yang direbase penuh ke Baileys v7 rc14, dengan engine E2EE Signal Protocol berlisensi **MIT** (`oktz-signal` + `oktz-curve25519`, native Rust) sebagai pengganti `libsignal` (GPL-3.0).
+---
 
-Fokus proyek ini: **bot WhatsApp multi-media** — kirim/terima audio, video, gambar, stiker, dan **Rich WebUI** (antarmuka HTML inline di dalam bubble chat), dengan konfigurasi default yang hemat RAM.
+## Apa ini
+
+`onigis` adalah fork dari [Baileys](https://github.com/WhiskeySockets/Baileys)
+di 7.0.0-rc14. Engine Signal Protocol — bagian yang mengenkripsi pesan Anda —
+diganti ke [`oktz-signal`](https://github.com/OktzO/oktz-signal) plus
+`oktz-curve25519`, keduanya Rust berlisensi MIT di belakang NAPI, menggantikan
+`libsignal` GPL-3.0. Selain engine itu, desain upstream tidak ditulis ulang.
+
+Fokus proyek: bot chat multi-media — pipeline audio, video, gambar, dan stiker,
+plus antarmuka HTML inline yang ter-render di dalam gelembung pesan.
+
+## Apa yang tidak akan diceritakan README ini
+
+Tiga hal yang biasanya diklaim README sejenis, dan yang tidak diklaim di sini:
+
+- **Tidak ada angka performa.** Tidak ada benchmark di repositori ini. Versi
+  lama file ini memuat tabel — "9× lebih cepat dari upstream", "186× lebih cepat
+  XEdDSA", "+5,7% di WABinary" — tanpa satu pun skrip reproduksi di dalam repo.
+  Angka itu dihapus karena tidak ada yang bisa mereproduksinya, dan angka yang
+  tidak bisa diperiksa lebih buruk daripada tidak ada.
+- **Tidak ada klaim bahwa kartu ter-render.** Apakah klien WhatsApp tertentu
+  menggambar `buttonsMessage` adalah perilaku Meta. Tidak ada test di repositori
+  ini yang bisa mengamatinya, jadi tidak diklaim di mana pun.
+- **Tidak ada klaim konformitas protokol terhadap server sungguhan.** Yang
+  diverifikasi adalah aritmetikanya: tanda tangan forged ditolak, ciphertext
+  forged tidak bisa didekripsi, dan frame yang library ini hasilkan bisa dibaca
+  oleh decoder-nya sendiri. Lihat [docs/protocol.md](docs/protocol.md) untuk apa
+  yang tercakup dan apa yang tidak.
 
 ---
 
-## Fitur Utama
+## Kebutuhan
 
-- **Paritas Baileys 7.0.0-rc14** — TC-token lengkap (trusted contact token dengan expiry & re-issue), Signal Repository API v7 (`getSessionInfo`, `hasSenderKey`, `getSenderKeyDistributionMessage`), format QR/pairing terbaru, penanganan reachout timelock.
-- **E2EE MIT** — tanpa keterikatan GPL `libsignal`; backend kriptografi native Rust via `oktz-signal`.
-- **Pipeline multi-media terpusat** — utilitas `media-processor` (ffmpeg/sharp/audio-decode, lazy-load).
-- **Rich WebUI** — render antarmuka HTML/CSS/JS langsung di bubble chat via `sendInlineWebUI`.
-- **RAM-friendly by default** — `syncFullHistory: false`, `enableRecentMessageCache: false`, TTL cache moderat.
-
----
-
-## Syarat
-
-| Kebutuhan | Versi |
+| | |
 |---|---|
-| Node.js | >= 20.0.0 |
+| Node.js | `>= 20.0.0` (dideklarasikan di `engines`; dites di 20 dan 22) |
+| E2EE native | `linux-x64` atau `linux-arm64`, glibc atau musl |
 
 ### Dukungan platform
 
-| OS / Arsitektur | Status |
-|---|---|
-| Linux x86_64 (glibc) — Ubuntu, Debian, Fedora, dll | **Didukung** |
-| Linux ARM64 (glibc) | **Eksperimental** |
-| Linux ARM64 (musl) — Alpine | **Eksperimental** |
-| Windows x86_64 | **Tidak didukung** |
-| macOS x86_64 | **Tidak didukung** |
+Permukaan native adalah tiga paket dengan cakupan **berbeda-bed**. Disatakan
+persis, karena salah di sini mudah terjadi ke dua arah:
 
-> Modul native (`oktz-signal`, `oktz-curve25519`, `whatsapp-rust-bridge`) saat ini baru dipublish untuk **linux-x64-gnu** saja. Untuk platform lain, ikuti panduan build native (`BuildNative-Windows.md`, `BuildNative-macOS.md`, `BuildNative-Linux.md`, `BuildNative-CI-Matrix.md`). Status di atas mencerminkan hasil CI smoke test (lihat `.github/workflows/platform-smoke.yml`).
+| paket | peran | cara dikirim | platform |
+|---|---|---|---|
+| `oktz-signal` 0.3.0-rc.1 | E2EE, XEdDSA | `.node` via `optionalDependencies` | `linux-arm64-{gnu,musl}`, `linux-x64-{gnu,musl}` — **empat, dan tidak ada yang lain** |
+| `oktz-curve25519` 0.0.4 | keygen dan DH X25519 | satu `.node`, tanpa `optionalDependencies` | `linux-x64-gnu` saja |
+| `whatsapp-rust-bridge` 0.5.4 | encoder WABinary | **WebAssembly**, di-inline di `dist/index.js` | platform mana pun dengan WebAssembly |
+| `node:crypto` | AES-GCM, SHA-256, HMAC, X25519, PBKDF2 | bawaan Node | semua |
+
+Yang menghasilkan:
+
+| platform | `import 'onigis'` | permukaan non-E2EE | E2EE |
+|---|---|---|---|
+| `linux-x64` (glibc) | jalan | jalan | jalan |
+| `linux-arm64` (glibc atau musl) | jalan | jalan | jalan |
+| `darwin` (macOS) | jalan | jalan | **gagal di pemakaian E2EE pertama** |
+| `win32` (Windows) | jalan | jalan | **gagal di pemakaian E2EE pertama** |
+| `android-arm64` | jalan | jalan | **gagal di pemakaian E2EE pertama** |
+
+**macOS dan Windows bukan platform yang tidak didukung — itu platform tanpa
+engine E2EE.** Sejak commit `cb02e9e` library ini bisa di-import dengan bersih
+di sana, dan semua yang tidak involve enkripsi tetap jalan: JID, encode/decode
+WABinary, seluruh permukaan protobuf, metadata grup, dan semua builder pesan.
+Kegagalan datang di pemanggilan E2EE pertama, sebagai error bertipe:
+
+```js illustrative
+try {
+  await sock.sendMessage(jid, { text: 'hai' }, { messageId });
+} catch (error) {
+  if (error.code === 'ONIGI_SIGNAL_ENGINE_UNSUPPORTED') {
+    // name: 'SignalEngineUnavailableError'
+    // message menyebut platform, engine, dan paket yang harus di-install
+    // cause: error loader aslinya
+  }
+}
+```
+
+**Klasifikasikan lewat `code`, jangan lewat teks pesan.** Pesannya ditulis untuk
+manusia dan bisa diubah wording-nya. Ada kode kedua yang lebih sempit,
+`ONIGI_XEDDSA_UNSUPPORTED`, artinya tidak ada binding yang punya prebuild sehingga
+XEdDSA sign *dan* verify sama-sama tidak tersedia; `Curve.verify` lalu menjawab
+`false` dan memberi peringatan sekali — itu fail-closed dan benar, tapi artinya
+handshake Noise tidak bisa diselesaikan.
+
+`tests/signal-lazy-engine.test.mjs` mereproduksi install darwin/win32 secara
+persis dan memverifikasi semua di atas, termasuk bahwa engine yang hilang tidak
+pernah dilaporkan sebagai "sesi tidak ada" atau "identitas tidak ada".
+
+**Apa yang benar-benar dieksekusi CI** dinyatakan di setiap job summary: suite
+jalan di `ubuntu-latest` (x64, glibc), di Node 20 dan Node 22. **Tidak ada job
+CI yang jalan di arm64 dan tidak ada yang jalan di musl.** Baris arm64 dan musl
+di matriks ada agar celah itu terlihat di laporan, bukan untuk mengklaim cakupan.
 
 ---
 
@@ -55,233 +117,358 @@ Fokus proyek ini: **bot WhatsApp multi-media** — kirim/terima audio, video, ga
 npm install onigis
 ```
 
-### Verifikasi instalasi platform
+`oktz-signal` adalah prarilis. Di registry, `0.3.0-rc.1` berada di dist-tag
+`rc`; `latest` masih menunjuk ke `0.1.7`. Kalau npm me-resolve `0.1.7`,
+install versinya secara eksplisit.
 
-Setelah install, verifikasi native dependencies load di platform ini:
+### Dependency opsional
+
+Empat fitur butuh paket yang bukan dependency library ini. Semuanya optional
+peer, dimuat dengan dynamic `import()` di dalam `try`, jadi proses yang tidak
+pernah memakai fitur itu juga tidak pernah memuatnya.
+
+| paket | membuka | tanpa itu |
+|---|---|---|
+| `sharp` | `resizeImage`, `getVideoThumbnail` | `Error: Package "sharp" … npm install sharp` |
+| `fluent-ffmpeg` | `convertToWhatsAppVideo`, `convertToOpusAudio`, `getVideoThumbnail` | `Error: … npm install fluent-ffmpeg` |
+| `jimp` | thumbnail alternatif | — |
+| `audio-decode` | waveform voice note (`ptt: true`) | — |
+| `link-preview-js` | link preview | — |
+
+`fluent-ffmpeg` juga butuh `ffmpeg` dan `ffprobe` di `PATH`; paketnya saja tidak
+cukup. `music-metadata` adalah dependency wajib, jadi `probeMedia` selalu jalan.
+
+Periksa apa yang benar-benar termuat di mesin Anda:
 
 ```bash
-# Verifikasi native production dependencies (full gate)
-node --test tests/platform-smoke.test.mjs
-
-# Quick check per dependency
-node -e "import('oktz-signal').then(({ native }) => console.log(typeof native.ratchetEncrypt))"
-node -e "console.log(typeof require('oktz-curve25519').sign)"
-node -e "import('whatsapp-rust-bridge').then(({ expandAppStateKeys }) => console.log(typeof expandAppStateKeys))"
+node -e "import('oktz-signal').then(m => console.log('signal:', typeof m.native.ratchetEncrypt))"
+node -e "import('oktz-curve25519').then(m => console.log('curve:', typeof m.sign))"
+node -e "import('whatsapp-rust-bridge').then(m => console.log('wabinary:', typeof m.expandAppStateKeys))"
 ```
 
-Semua command harus mengeluarkan `function`. Gagal = native binary tidak cocok platform atau gagal load.
-
-### Dependency opsional (install sesuai fitur)
-
-| Package | Untuk fitur |
-|---|---|
-| `audio-decode` | Waveform voice note (`ptt: true`) — **wajib untuk voice note** |
-| `sharp` | Resize/kompres gambar |
-| `fluent-ffmpeg` | Konversi video/audio, thumbnail video |
-| `jimp` | Thumbnail alternatif (tanpa sharp) |
-| `link-preview-js` | Link preview |
+`function` dari ketiganya berarti permukaan native ada. Dua yang pertama `.node`;
+yang ketiga WebAssembly dan jalan di mana saja.
 
 ---
 
-## Quick Start
+## Mulai cepat
 
-```js
-import makeWASocket, { useMultiFileAuthState } from 'onigis';
+```js illustrative
+import makeWASocket, { useMultiFileAuthState, DisconnectReason } from 'onigis';
 
 const { state, saveCreds } = await useMultiFileAuthState('auth_info');
 
-const sock = makeWASocket({
-  auth: state,
-  printQRInTerminal: true
-});
+const sock = makeWASocket({ auth: state });
 
 sock.ev.on('creds.update', saveCreds);
 
+// Tidak ada sock.ev.lastDisconnect: alasannya datang di event itu sendiri.
+sock.ev.on('connection.update', ({ connection, qr, lastDisconnect }) => {
+  if (qr) {
+    console.log(qr);            // render sesuka Anda
+  } else if (connection === 'close') {
+    const status = lastDisconnect?.error?.output?.statusCode;
+    console.log(status === DisconnectReason.loggedOut
+      ? 'ter-unlink — hapus auth_info lalu pair lagi'
+      : 'menghubungkan ulang');
+  }
+});
+
 sock.ev.on('messages.upsert', async ({ messages }) => {
-  const msg = messages[0];
-  if (!msg.message || msg.key.fromMe) return;
-
-  const jid = msg.key.remoteJid;
-  const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
-
-  if (text === '!ping') {
-    await sock.sendMessage(jid, { text: 'pong' }, { quoted: msg });
+  for (const msg of messages) {
+    if (!msg.message || msg.key.fromMe) continue;
+    const text = msg.message.conversation || msg.message.extendedTextMessage?.text || '';
+    if (text === '!ping') {
+      await sock.sendMessage(msg.key.remoteJid, { text: 'pong' }, { quoted: msg });
+    }
   }
 });
 ```
 
----
+`sock.user` adalah `creds.me` dan punya `.id`. Tidak ada `sock.user.jid` di
+library ini; kode yang membacanya dapat `undefined` dan menempelkan participant
+null ke pesan grup. Pakai `normalizeUserJid(sock)`, yang menerima jid, sock, atau
+objek user.
 
-## Contoh: Multi-Media
+`sock.ev` bukan Node `EventEmitter` — ia punya `on`, `off`, `removeAllListeners`
+dan `emit`, tanpa `once`.
 
-### Kirim gambar dengan caption
-
-```js
-await sock.sendMessage(jid, {
-  image: { url: 'https://example.com/foto.jpg' },
-  caption: 'Halo!'
-});
-```
-
-### Kirim voice note (PTT)
-
-```js
-// butuh: npm install audio-decode
-await sock.sendMessage(jid, {
-  audio: { url: './voice.ogg' },
-  mimetype: 'audio/ogg; codecs=opus',
-  ptt: true
-});
-```
-
-### Konversi video/audio sebelum kirim (media-processor)
-
-```js
-import { convertToWhatsAppVideo, convertToOpusAudio, getVideoThumbnail, resizeImage } from 'onigis';
-
-// Video apapun -> MP4/H.264 kompatibel WhatsApp (butuh fluent-ffmpeg)
-const mp4 = await convertToWhatsAppVideo(bufferMentah);
-await sock.sendMessage(jid, { video: mp4, caption: 'Video terkonversi' });
-
-// Audio apapun -> OGG/Opus untuk voice note
-const opus = await convertToOpusAudio(bufferAudio);
-
-// Thumbnail video & resize gambar (butuh sharp)
-const thumb = await getVideoThumbnail(mp4, 1);
-const small = await resizeImage(imageBuffer, { width: 300, height: 300 });
-```
-
-### Probe metadata media
-
-```js
-import { probeMedia, getMp4Duration } from 'onigis';
-
-const meta = await probeMedia(buffer, 'audio/mpeg'); // { duration, bitrate, container, codec }
-const dur = getMp4Duration(mp4Buffer); // tanpa ffmpeg — parse atom langsung
-```
+Panduan lengkap: **[docs/quickstart.md](docs/quickstart.md)**.
 
 ---
 
-## Contoh: Rich WebUI (HTML inline di bubble chat)
+## Coba tanpa akun WhatsApp
 
-Kirim antarmuka HTML/CSS/JS yang **ter-render langsung di dalam pesan** — cocok untuk menu interaktif, mini-app, dashboard:
-
-```js
-import { sendInlineWebUI } from 'onigis';
-
-const html = `<!DOCTYPE html>
-<html><head><style>body{background:#111b21;color:#fff;font-family:sans-serif;padding:16px}</style></head>
-<body><h2>Menu Bot</h2><button onclick="alert('hai')">Tekan aku</button></body></html>`;
-
-await sendInlineWebUI(sock, jid, html, 'Menu Bot');
-
-// Identitas bisa di-override (default: Meta AI)
-await sendInlineWebUI(sock, jid, html, 'Menu Bot', {
-  botJid: '12345@bot',
-  forwardOrigin: 'CUSTOM'
-});
-```
-
-> Catatan: nama primitive HTML (`GenAIaeacdsnwHtmlPrimitive`) adalah identifier obfuscated WhatsApp Web dan bisa berubah antar versi. Jika WebUI berhenti ter-render, update identifier dari bundle WA Web terbaru.
-
----
-
-## Konfigurasi Default (RAM-friendly)
-
-```js
-const sock = makeWASocket({
-  auth: state,
-  // default sudah irit; override bila perlu:
-  syncFullHistory: false,          // tidak menarik riwayat chat penuh
-  enableRecentMessageCache: false, // tidak menyimpan pesan terbaru di RAM
-});
-```
-
----
-
-## Performa (benchmark vs Baileys upstream)
-
-Diukur pada Node v20.19.1, Linux x64, loop in-process, bentuk pesan realistis (20 partisipan, buffer 96–128B). Semua script bisa direproduksi; verifikasi: test suite Onigi 31 pass + oracle interop oktz-signal bit-exact vs libsignal v6.
-
-### E2EE Signal Protocol (engine swap: oktz-signal vs libsignal)
-
-| Skenario | Onigi (oktz-signal, Rust) | Upstream (libsignal, JS) | Pemenang |
-|---|---:|---:|---|
-| **Build session penuh** (X3DH + PKMsg enc/dec, kunci acak) | **3,5 ms** | 31,8 ms | **Onigi 9× lebih cepat** |
-| **Steady-state per pesan** (ratchet enc+dec dua arah) | **195–330 µs** | 570–695 µs | **Onigi 2–3,5× lebih cepat** |
-| XEdDSA sign | 165,6 µs | 30,7 ms | **186× lebih cepat** |
-| XEdDSA verify | 138,9 µs | 32,3 ms | **233× lebih cepat** |
-| X25519 DH | 330,8 µs | 308,2 µs | ~par (keduanya native) |
-
-> Dalam praktik: setiap prekey message masuk dan setiap pembentukan session — operasi yang terjadi saat pairing device baru, setelah reinstall, dan saat peer rotasi key — 9× lebih murah di CPU. Untuk bot multi-chat yang sibuk, ini beda antara event-loop jank terlihat dan tidak sama sekali.
-
-### WABinary (codec binary protobuf-XML, rust encode default)
-
-| Implementasi | µs/op roundtrip | ops/s | vs upstream |
-|---|---:|---:|---|
-| **Onigi — Rust encode (default)** | **146,4** | 6.832 | **+5,7% lebih cepat** |
-| Onigi — JS fallback (`ONIGI_RUST_WABINARY=0`) | 155,7 | 6.422 | ~par |
-| Upstream baileys rc14 | 154,7 | 6.465 | baseline |
-| Onigi — Rust decode (`ONIGI_RUST_WABINARY_DECODE=1`, opt-in) | ~255 | ~3.900 | 65% lebih lambat — benar default OFF |
-
-### Keunggulan Onigi vs upstream rc14 (terverifikasi di kode)
-
-- **TC-token**: implementasi paritas penuh WA Web (persist index, merge write, prune 24 jam, bucket expiry 28 hari, re-issue setelah identity change, recovery 463, gating AB props) — upstream rc14 hanya parsial.
-- **Sistem retry (gaya whatsmeow)**: MessageRetryManager dengan deteksi collision baseKey, penjadwalan phone-request, kode error MAC — upstream rc14 tidak punya.
-- **Anti-spoof protocolMessage**: SELF_ONLY_TYPES di-drop dari origin non-self (port whatsmeow) — keunggulan security atas upstream.
-- **LTHash soft-recovery** saat app-state mismatch (warn + partial state) alih-alih hard-fail seperti upstream.
-- **Fix write-amplification**: debounce flush device-list (5 detik, satu `keys.set`), noise burst-concat, lazy stack-capture di timeout.
-- **LIDMappingStore** dengan inflight-coalescing (dedupe USync lookup bersamaan); queue offline node dibatasi 5000.
-- Resolusi LID yang konsisten di alur public-facing: `onWhatsApp` menerima JID `@lid` (resolve via `lid-mapping` bila ada; tanpa mapping → dilewati, tidak menghasilkan nomor palsu), `participant` reply/grup diisi `userJid` yang konsisten dengan addressing (`creds.me.lid` untuk percakapan LID, `creds.me.id` untuk PN).
-
-### Celah yang ditemukan audit September 2026 (urut prioritas fix)
-
-| # | Severity | Masalah | Lokasi |
-|---|---|---|---|
-| 1 | CRITICAL (kebersihan rilis) | `package.json` pin `oktz-signal 0.2.0-rc.1` tapi `node_modules`/lockfile resolve **0.1.7** (`npm ls` → invalid) — versi yang dikirim ke user tidak pernah dites di tree ini | `package.json:38` |
-| 2 | HIGH | Bug session-selection oktz-signal (entry pertama BTreeMap, bukan session open) ter-trigger dari `encryptMessage` di setiap pesan keluar saat record punya >1 session (LID migration membuat record multi-session jadi kondisi *normal*). **Mitigasi di wrapper**: prune ke 1 session open sebelum encrypt | `lib/Signal/libsignal.js:115-124` |
-| 3 | HIGH | `process.nextTick(async …)` di `emitOwnEvents` **tanpa `.catch()`** — listener user yang throw jadi unhandledRejection (crash process di default Node 20) | `lib/Socket/messages-send.js:1202-1206` |
-| 4 | MEDIUM | `relayMessage` menahan mutex transaksi per-akun sepanjang pipeline termasuk RTT network — semua send terserial total saat load | `lib/Socket/messages-send.js:493-918` |
-| 5 | MEDIUM | `sender-key-memory` di-write unconditional per group send (seluruh map dipersist walau tidak ada recipient baru) | `lib/Socket/messages-send.js:609` |
-| 6 | MEDIUM | WAM telemetry: 831KB konstanta mati termuat ke module graph via `export * from './WAM/index.js'` — tidak pernah dipakai runtime | `lib/WAM/constants.js` |
-| 7 | MEDIUM | `historyCache` di event-buffer tanpa hard cap antar-flush — initial sync akun besar menahan setiap key yang pernah dilewati | `lib/Utils/event-buffer.js:27-79` |
-| 8 | MEDIUM | `+countChild.attrs.value` crash diam-diam bila child `<count>` absen (cek pre-key-low mati senyap) | `lib/Socket/messages-recv.js:560-561` |
-
-Hasil audit memory leak: **praktis bersih** — lifecycle cleanup socket menutup semua cache/timer, keyed mutex pakai refcount cleanup, `end()` idempotent. Sisa LOW: `setTimeout` 8 detik tanpa `unref()`, Map `fileLocks` level modul, dan gap historyCache di atas.
-
-Catatan gap test coverage: **jalur Signal/E2EE roundtrip punya nol test** — padahal komponen inilah yang diganti total. Menambah test roundtrip encrypt→decrypt adalah test bernilai tertinggi yang bisa dimiliki repo ini.
-
----
-
-## Breaking Changes dari 9.x (oktz-baileys lama)
-
-- Base direbase ke Baileys **7.0.0-rc14** (bukan lagi ourin-baileys 9.0.21).
-- Modul yang **dihapus**: `lib/VoIP/*` (call client WebRTC), `Modded/message_builder.js`, `Utils/rich-messages.js`, `Socket/dugong.js`, `Utils/sticker-pack.js`.
-  - `rejectCall` tetap tersedia (core `messages-recv`).
-  - Pengganti rich message lama: `rich-webui.js` (`sendInlineWebUI`, `buildWebuiMessage`).
-- Default config berubah: `syncFullHistory` dan `enableRecentMessageCache` kini `false`.
-- `protobufjs-cli` dipin ke `^1.1.3` (fix konflik peer dependency); `link-preview-js` ke `^5.0.0` (fix advisory SSRF).
-
----
-
-## Testing
+Enam program di `examples/` jalan tanpa kredensial, tanpa jaringan, dan tanpa
+akun:
 
 ```bash
-npm test
+node examples/01-connect.mjs           # handshake Noise, atas byte sungguhan
+node examples/02-e2ee-roundtrip.mjs    # X3DH, ratchet, sender key grup
+node examples/03-wabinary.mjs          # format wire, dan apa yang ditolaknya
+node examples/04-rich-messages.mjs     # tombol, list, HTML inline
+node examples/05-addressing.mjs        # JID PN / LID / hosted
+node examples/06-media.mjs             # yang jalan tanpa dependency opsional
 ```
 
-Termasuk unit test: JID utils (PN/LID/hosted), Rich WebUI (build + roundtrip proto encode/decode).
+Atau semuanya, plus setiap blok kode yang bisa dijalankan di dokumen ini:
+
+```bash
+npm run docs:verify
+```
+
+`docs:verify` menjalankan masing-masing di proses sendiri dan gagal pada error
+apa pun. Blok ````js` yang di dokumentasi, baik bertanda `run` maupun
+`illustrative`, juga akan menggagalkan run — verifier tidak menjalankannya dan
+tidak mengabaikannya diam-diam.
+
+### Apa yang sebenarnya ditunjukkan `examples/01-connect.mjs`
+
+Ia menjalankan `makeWASocket` sungguhan terhadap WebSocket server lokal yang
+mimplementasikan separuh server dari `Noise_XX_25519_AESGCM_SHA256`, lalu
+memverifikasi byte yang benar-benar ditulis klien. Hasilnya adalah **kegagalan**,
+dan justru itu yang menarik:
+
+```
+clientHello: 36 bytes, ephemeral 32 bytes, re-encodes identically
+client refused the server certificate: "noise intermediate certificate signature invalid"
+```
+
+Jadwal kunci cocok di kedua arah — klien mendekripsi `static` dan `payload` dari
+server, yang tidak mungkin dilakukan kalau server menghitung jadwalnya berbeda.
+Yang gagal adalah pemeriksaan sertifikat, karena `WA_CERT_DETAILS.PUBLIC_KEY`
+adalah kunci jangka panjang asli milik WhatsApp dan separuh privatnya tidak ada
+di repositori ini.
+
+Penolakan itu adalah hasil yang benar, dan example-nya memverifikasi status code
+dan pesan persisnya sehingga pelemahan di `lib/Utils/noise-handler.js:183` akan
+menggagalkan test. Kunci transport karena itu tidak pernah dinegosiasikan di
+example mana pun, dan tidak ada example yang mengklaim menunjukkan `sendMessage`
+di atas transport sungguhan.
+
+---
+
+## Pesan kaya
+
+`buttonsMessage` dan `listMessage` adalah template bawaan WhatsApp. Library ini
+membangunnya; apakah klien tertentu menggambarnya adalah hal yang tidak bisa
+diuji atau diklaim repositori ini.
+
+```js illustrative
+import { buildButtonsMessage, buildListMessage, sendClassicMessage } from 'onigis';
+
+await sendClassicMessage(sock, jid, buildButtonsMessage({
+  text: 'Pilih satu opsi',
+  footer: '© onigis',
+  buttons: [
+    { buttonId: '.owner', buttonText: 'Owner' },
+    { buttonId: '.menu', buttonText: 'Semua menu' }
+  ]
+}));
+
+await sendClassicMessage(sock, jid, buildListMessage({
+  title: 'Menu',
+  buttonText: 'Buka',
+  sections: [{
+    title: 'Kategori',
+    rows: [{ title: 'main', description: '19 perintah', rowId: '.menucat main' }]
+  }]
+}));
+```
+
+`relayMessage` menempelkan ulang node `<biz>` otomatis untuk payload seperti ini,
+kecuali Anda sudah menyediakannya sendiri — tanpanya server menerima stanza tapi
+klien tidak menggambar kartunya, dan pengiriman dilaporkan sukses.
+
+### HTML inline di dalam gelembung pesan
+
+```js illustrative
+import { sendInlineWebUI } from 'onigis';
+
+await sendInlineWebUI(sock, jid,
+  '<!DOCTYPE html><html><body><h2>Menu</h2><button onclick="alert(1)">Go</button></body></html>',
+  'Menu Bot'
+);
+```
+
+HTML-nya dibawa sebagai base64-encoded JSON di bawah primitive typename
+`GenAIaeacdsnwHtmlPrimitive`, di-forward dari jid Meta AI secara default. Nama
+typename itu adalah identifier obfuscated WhatsApp Web dan bisa berubah antar
+versi WhatsApp; kalau antarmukanya berhenti ter-render, konstanta itulah yang
+perlu diperbarui (`WEBUI_PRIMITIVE_TYPENAME`, `lib/Utils/rich-webui.js:15`).
+Payload di atas 64 KiB akan memberi peringatan.
+
+---
+
+## Media
+
+```js illustrative
+import { convertToWhatsAppVideo, convertToOpusAudio, getVideoThumbnail, resizeImage, probeMedia, getMp4Duration } from 'onigis';
+
+const mp4 = await convertToWhatsAppVideo(buffer);          // butuh ffmpeg
+const opus = await convertToOpusAudio(buffer);            // butuh ffmpeg
+const thumb = await getVideoThumbnail(mp4, 1);            // butuh ffmpeg + sharp
+const small = await resizeImage(imageBuffer, { width: 300, height: 300 });   // butuh sharp
+
+const meta = await probeMedia(buffer, 'audio/mpeg');      // selalu tersedia
+const dur = getMp4Duration(mp4Buffer);                    // selalu tersedia — parse atom MP4 langsung
+```
+
+`getMp4Duration` tidak butuh apa pun selain `node:buffer`. Ia menelusuri atom
+`moov`/`mvhd` sendiri. Mengembalikan `0` untuk apa pun yang bukan MP4 secara
+default, karena ia dijalankan pada byte dari pemanggil; teruskan
+`{ silent: false }` untuk error yang menyebut guard mana yang kepicu.
+
+`examples/06-media.mjs` menguji kedua sisi — jalur bebas dependency di atas MP4
+byte-exact yang dibangun repositori ini sendiri, dan kontrak dependency opsional
+dengan memverifikasi teks error persis saat `sharp` dan `ffmpeg` tidak ada.
+
+---
+
+## Addressing
+
+WhatsApp meng-address satu orang dengan dua cara: nomor telepon
+(`…@s.whatsapp.net`, "PN") dan identifier opaque (`…@lid`). Device 99 tinggal di
+domain ketiga, `hosted`; pasangannya untuk LID adalah `hosted.lid`.
+
+Library memperlakukan ini sebagai **domain berbeda, bukan dua nama untuk hal
+yang sama**, dan tidak pernah mengarang konversi:
+
+- `isPnUser` / `isLidUser` adalah tes domain. LID bukan nomor telepon.
+- `areJidsSameUser(a, b)` membandingkan bagian user dan menolak operand mana pun
+  yang bukan user — jid grup, broadcast, status, atau newsletter bukan user
+  bagaimanapun bagian user-nya terbaca. Ia mengembalikan `false`, tidak pernah
+  menebak, ketika salah satu sisi tidak menamai user.
+- Alamat Signal adalah `name.deviceId`, dan untuk domain non-PN namanya adalah
+  `user_<domainType>`, sehingga alamat LID dan alamat PN tidak bisa bertabrakan
+  di session store.
+- `sendMessage` menurunkan identitas pengirim dari addressing **chat**-nya,
+  bukan dari tipe pesan, dan menempelkan nilai yang sama ke
+  `contextInfo.participant`.
+
+`onWhatsApp(...jids)` menjawab satu entri per input, sesuai urutan input, dengan
+`jid` yang dikembalikan persis seperti yang pemanggil tulis, dan `exists` tiga
+nilai:
+
+| nilai | arti |
+|---|---|
+| `true` | server mengembalikan baris kontak |
+| `false` | server mengembalikan baris yang bukan kontak |
+| `null` | **tidak bisa ditentukan** |
+
+`null` adalah jawaban sungguhan, bukan `false` yang malas. Ia mencakup `@lid`
+tanpa mapping nomor telepon, dan baris yang tidak pernah dijawab server. Versi
+sebelumnya mengembalikan jid milik server untuk setiap input — jadi pemanggil
+yang mengirim `@lid` dapat nomor telepon kembali — dan menyamakan kedua kasus itu
+dengan "tidak ada di WhatsApp".
+
+**Dukungan LID tidak diklaim lengkap.** Resolusi butuh round trip usync sungguhan,
+dan apakah server Meta menjawab konsisten di setiap kasus adalah hal yang tidak
+bisa diuji repositori ini. `examples/05-addressing.mjs` menunjukkan apa yang
+dilakukan helper untuk keenam bentuk jid, lalu menyatakan, di output-nya sendiri,
+persis apa yang tidak dibuktikan.
+
+Detail: [docs/api.md §7](docs/api.md#7-addressing-pn-lid-hosted).
+
+---
+
+## Catatan keamanan
+
+Lima cacat di lini 10.1.0-rc.5 diperbaiki setelah tag `v10.1.0-rc.6`. **Kalau
+Anda memakai rilis sampai dan termasuk `10.1.0-rc.6`, tiga di antaranya bisa
+dijangkau oleh peer jarak jauh.** Semuanya didaftarkan lengkap dengan apa yang
+membukakannya bagi penyerang, dan dengan commit yang memperbaikinya, di
+[CHANGELOG.md](CHANGELOG.md#read-this-before-upgrading-from-1010-rc5-or-earlier).
+
+Dua yang paling sering diremeh:
+
+**Verifikasi tanda tangan adalah no-op.** `Curve.verify` membuang boolean yang
+dikembalikan library native — yang menjawab `false` pada ketidakcocokan alih-alih
+melempar error, berbeda dari `curve25519-js` yang digantikannya — lalu
+hardcode `return true`. Setiap tanda tangan dengan bentuk yang masuk akal
+terverifikasi. Itu membuat rantai sertifikat Noise dan tanda tangan pairing ADV
+menjadi no-op, sehingga websocket tidak mengautentikasi apa pun tentang peer-nya.
+`42d416d`.
+
+**Satu pesan forged bisa membuat satu percakapan mati total.** Field `identityKey`
+pada pembungkus `pkmsg` tidak dicakup MAC yang diperiksa saat dekripsi, dan
+`auth.keys.transaction` adalah mutex per-key, bukan rollback. Kunci identitas
+disimpan *sebelum* dekripsi, sehingga satu `pkmsg` yang tidak terautentikasi
+bisa menghapus sesi yang sudah mapan dan menimpa kunci identitas yang tersimpan
+sebelum MAC-nya sempat gagal. `9c64fc7`.
+
+**Yang tidak diklaim.** Library ini tidak punya test terhadap server WhatsApp
+sungguhan. Bahwa rantai sertifikat tervalidasi dengan benar terhadap yang asli,
+bahwa interoperabilitas terjaga dengan klien WhatsApp terkini, dan bahwa tidak
+ada cacat protokol lain yang tersisa — semuanya di luar jangkauan apa pun yang
+ada di repositori ini.
+
+---
+
+## Pengujian
+
+```bash
+npm test              # 428 test, 74 file
+npm run docs:verify   # setiap example, setiap blok dokumen yang bisa dijalankan
+```
+
+Keduanya jalan di CI pada Node 20 dan Node 22.
+
+Dua jebakan pemanggilan yang sudah pernah menimpa repositori ini, dan keduanya
+membikin CI rusak:
+
+- **Jangan pernah `node --test` polos.** Ia turun ke `native/curve25519`, proyek
+  Rust yang di-vendor dengan suite test sendiri yang butuh build dan gagal di
+  sini. Ia mengambil `native/curve25519/tests/platform-loader.test.cjs` seolah
+  itu milik kita.
+- **Jangan pernah positional glob yang diapit**, `node --test 'tests/**/*.test.mjs'`.
+  Dukungan glob bawaan Node untuk argumen posisional itu Node 22+; di Node 20
+  perintah yang sama gagal dengan `Could not find 'tests/**/*.test.mjs'`.
+
+`npm test` memakai glob *shell*, yang diekspansi shell sebelum Node melihatnya,
+jadi jalan di keduanya. Itulah sebabnya script itu ditulis begitu.
+
+Dua environment variable mengubah perilaku:
+
+| variabel | efek |
+|---|---|
+| `ONIGI_RUST_WABINARY=0` | pakai encoder WABinary JS, bukan yang native |
+| `ONIGI_RUST_WABINARY_DECODE=1` | pakai decoder native (opt-in; mati secara default) |
+
+`whatsapp-rust-bridge` adalah modul WebAssembly dengan `dist/index.js`
+men-inline wasm sebagai base64, jadi jalur encode jalan di platform mana pun
+dengan WebAssembly. `lib/WABinary/rust-adapter.js:21` mengarahkan dua bentuk
+yang divergen antara encoder native dan JS — atribut non-string, dan atribut
+string kosong — ke encoder JS, sehingga keduanya tidak pernah tercampur dalam satu
+frame.
+
+---
+
+## Dokumentasi
+
+| | |
+|---|---|
+| [docs/quickstart.md](docs/quickstart.md) | connect, kirim, terima; dan jalur offline |
+| [docs/api.md](docs/api.md) | 170 anggota socket dan 282 export teratas, dikelompokkan |
+| [docs/protocol.md](docs/protocol.md) | format wire dan pemeriksaannya, dikutip per `file:line` |
+| [CHANGELOG.md](CHANGELOG.md) | apa yang berubah, dan apa yang salah |
+| [examples/](examples/) | enam program yang bisa dijalankan |
+
+`lib/index.js` meng-export 282 simbol. `docs/api.md` mengelompokkannya, bukan
+mencantumkan satu per satu, karena tabel 282 baris yang tidak pernah diperiksa
+lebih buruk daripada tabel terkelompok dengan penunjuk ke `.d.ts`. Ada 99 file
+`.d.ts` yang dipelihara manual dan tidak ada `tsc` di repo ini, jadi itu artefak
+yang di-commit, bukan output build; `tests/dts-declarations.test.mjs` menjaga
+konsistensinya dengan runtime.
 
 ---
 
 ## Kredit
 
-- **[KzorArsuy](https://github.com/rozzak2009)** — audit, rebase rc14, optimasi, multimedia & WebUI
-- **[OktzO](https://github.com/OktzO)** — fork awal `oktz-baileys` & engine `oktz-signal`/`oktz-curve25519`
-- **[WhiskeySockets/Baileys](https://github.com/WhiskeySockets/Baileys)** — upstream library
-
----
+- **[KzorArsuy](https://github.com/rozzak2009)** — audit, rebase rc14, optimasi, multimedia dan WebUI
+- **[OktzO](https://github.com/OktzO)** — fork `oktz-baileys` asli, dan engine `oktz-signal` / `oktz-curve25519`
+- **[WhiskeySockets/Baileys](https://github.com/WhiskeySockets/Baileys)** — upstream
 
 ## Lisensi
 
-**MIT** — bebas dari pembatasan GPL `libsignal`.
+MIT.
