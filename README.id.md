@@ -408,7 +408,7 @@ ada di repositori ini.
 ## Pengujian
 
 ```bash
-npm test              # 428 test, 74 file
+npm test              # 428 test, 73 file
 npm run docs:verify   # setiap example, setiap blok dokumen yang bisa dijalankan
 ```
 

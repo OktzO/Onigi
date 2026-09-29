@@ -103,7 +103,7 @@ jobs:
             echo "| executed on | ubuntu-latest, x86_64, glibc |"
             echo "| Node | ${{ matrix.node }} (engines: >=20.0.0) |"
             echo "| WABinary | leg 1: JS encoder (ONIGI_RUST_WABINARY=0). leg 2: native decoder (ONIGI_RUST_WABINARY_DECODE=1, opt-in, no other coverage) |"
-            echo "| tests run | 428, in 74 files |"
+            echo "| tests run | 428, in 73 test files |"
             echo "| docs:verify | every example and every \`\`js run\`\` block |"
             echo
             echo "**Not executed here:**"

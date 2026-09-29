@@ -403,7 +403,7 @@ establish.
 ## Testing
 
 ```bash
-npm test              # 428 tests, 74 files
+npm test              # 428 tests, 73 files
 npm run docs:verify   # every example, every runnable doc block
 ```
 

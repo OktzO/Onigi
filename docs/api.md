@@ -499,7 +499,7 @@ the matrix exist to make the gap visible, not to claim coverage — read the
 ## 9. Running the tests
 
 ```bash
-npm test              # node --test tests/*.test.mjs — 428 tests, 74 files
+npm test              # node --test tests/*.test.mjs — 428 tests, 73 files
 npm run docs:verify   # every example, and every runnable block in these docs
 ```
 
