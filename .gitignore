@@ -6,5 +6,8 @@ target/
 node_modules/
 *.node
 
-# docs — lokal saja, bukan bagian package
-docs/
+# docs — audit notes lokal (curve25519-audit.md), bukan bagian package.
+# Sisanya (quickstart/api/protocol) sengaja di-commit: `npm run docs:verify`
+# membacanya dan CI menjalankannya, jadi docs yang tidak ada di repo tidak akan
+# pernah diuji.
+docs/curve25519-audit.md
