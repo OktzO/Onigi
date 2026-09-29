@@ -1,5 +1,30 @@
 name: CI
 
+# Every action is pinned to a commit SHA, with the version in a trailing
+# comment. A floating tag is a supply-chain decision made by whoever last moved
+# the tag, and this workflow is the one that runs the security-relevant suite.
+#
+# READ THIS BEFORE TRUSTING A GREEN TICK
+#
+# 1. Only ONE of the five targets is ever executed. `x86_64-unknown-linux-gnu`
+#    is built, loaded, and has the JS suite and the documentation gate run
+#    against it. The other four are *compiled and uploaded*, never loaded — no
+#    runner in this file can execute a musl or aarch64 or an Android binary.
+#    The `status` field in the matrix says so per target, and it is echoed to
+#    the step summary rather than left implicit.
+# 2. There are no Rust tests. `src/lib.rs` has no `#[test]` functions, so
+#    `cargo test` would report 0 tests. Everything that is actually checked
+#    runs in the `verify` job.
+# 3. The paths below are relative to the root of the *enclosing* Onigi
+#    repository (`native/curve25519/…`), and `npm ci` runs that repository's
+#    root lockfile. GitHub only reads `.github/workflows/` at a repository
+#    root, so as it sits inside the vendored directory this file does not
+#    execute at all; it is the workflow for when this directory is split out.
+#    Split out as-is, the paths and the lockfile reference do not resolve.
+#    That is recorded in CHANGELOG.md as known issue 5 and has not been
+#    rewritten here, because changing it would silently change which
+#    repository this file is meant to describe.
+
 on:
   push:
   pull_request:
@@ -11,6 +36,9 @@ on:
         required: false
         default: false
 
+permissions:
+  contents: read
+
 jobs:
   build:
     name: ${{ matrix.target }} (${{ matrix.status }})
@@ -21,32 +49,32 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             package: linux-x64-gnu
-            status: runtime-tested
+            status: built-and-loaded
             command: npm exec -- napi build --release --target x86_64-unknown-linux-gnu --config-path native/curve25519/napi.config.json --manifest-path native/curve25519/Cargo.toml --output-dir native/curve25519 --js index.cjs
           - target: x86_64-unknown-linux-musl
             package: linux-x64-musl
-            status: compile-only
+            status: compiled-never-loaded
             command: npm exec -- napi build --release --target x86_64-unknown-linux-musl --cross-compile --config-path native/curve25519/napi.config.json --manifest-path native/curve25519/Cargo.toml --output-dir native/curve25519 --js index.cjs
           - target: aarch64-unknown-linux-gnu
             package: linux-arm64-gnu
-            status: compile-only
+            status: compiled-never-loaded
             command: npm exec -- napi build --release --target aarch64-unknown-linux-gnu --use-napi-cross --config-path native/curve25519/napi.config.json --manifest-path native/curve25519/Cargo.toml --output-dir native/curve25519 --js index.cjs
           - target: aarch64-unknown-linux-musl
             package: linux-arm64-musl
-            status: compile-only
+            status: compiled-never-loaded
             command: npm exec -- napi build --release --target aarch64-unknown-linux-musl --cross-compile --config-path native/curve25519/napi.config.json --manifest-path native/curve25519/Cargo.toml --output-dir native/curve25519 --js index.cjs
           - target: aarch64-linux-android
             package: android-arm64
-            status: compile-only
+            status: compiled-never-loaded-never-published
             command: npm exec -- napi build --release --target aarch64-linux-android --config-path native/curve25519/napi.config.json --manifest-path native/curve25519/Cargo.toml --output-dir native/curve25519 --js index.cjs
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 20
           cache: npm
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: taiki-e/install-action@v2
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
           tool: zig
       - run: npm ci
@@ -54,15 +82,96 @@ jobs:
         run: ${{ matrix.command }}
       - name: Create npm artifact
         run: npm exec -- napi artifacts --config-path native/curve25519/napi.config.json --output-dir native/curve25519 --npm-dir npm
-      - name: Test runnable Linux x64 GNU build
-        if: matrix.target == 'x86_64-unknown-linux-gnu'
+      - name: Say plainly what this leg did
+        # Not a placeholder. A build matrix that says only "built" reads as
+        # coverage for five platforms and delivers one. Each target's status
+        # comes from the matrix, so it cannot drift from the job that ran.
         run: |
-          npm test
-          node --test native/curve25519/tests/platform-loader.test.cjs native/curve25519/tests/pack-install.test.cjs
-      - name: Runtime status
-        run: echo "${{ matrix.target }}: ${{ matrix.status }}" >> "$GITHUB_STEP_SUMMARY"
-      - uses: actions/upload-artifact@v4
+          {
+            echo "### ${{ matrix.target }} — \`${{ matrix.status }}\`"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| target | \`${{ matrix.target }}\` |"
+            echo "| platform package | \`@oktz-curve25519/curve25519-${{ matrix.package }}\` |"
+            echo "| published on npm | no — every \`@oktz-curve25519/curve25519-*\` name 404s |"
+            echo "| binary executed here | $([ '${{ matrix.status }}' = built-and-loaded ] && echo yes || echo '**no**') |"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: curve-${{ matrix.package }}
           path: npm/${{ matrix.package }}
           if-no-files-found: error
+
+  # Everything below runs the checks. It is a separate job from `build` for two
+  # reasons: the Node version matrix multiplies the runtime, and the binaries
+  # are identical across Node versions while the JS surface is not.
+  #
+  # The .node comes from the build job's artifact rather than from a second
+  # build, so this matrix costs three `npm ci` and no rustc. Downloading the
+  # platform package and putting the binary where the loader first looks
+  # (native-loader.cjs:296, `./curve25519.linux-x64-gnu.node`) is exactly the
+  # layout a `npm install` of a published platform package produces.
+  verify:
+    name: node ${{ matrix.node }} / linux-x64-gnu / tests + docs
+    needs: build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # engines declares node >=20.0.0, so 20 is the floor and is tested.
+        # 22 is here because `node --test tests/` — the form this package used
+        # to declare — fails on it; 24 is the current LTS line.
+        node: ['20', '22', '24']
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: curve-linux-x64-gnu
+          path: native/curve25519/.built
+      - name: Put the built binary where the loader looks first
+        run: |
+          cp native/curve25519/.built/curve25519.linux-x64-gnu.node \
+             native/curve25519/curve25519.linux-x64-gnu.node
+          node -e "
+            const c = require('./native/curve25519/index.cjs');
+            const kp = c.generateKeyPair(new Uint8Array(32));
+            const sig = c.sign(kp.private, Buffer.from('ci'));
+            if (sig.length !== 64) throw new Error('not an XEdDSA signature');
+            if (!c.verify(kp.public, Buffer.from('ci'), sig)) throw new Error('round trip failed');
+            console.log('the loader resolved a real binary on node ${{ matrix.node }}');
+          "
+      - name: Run the JS test suite
+        # `npm test` is `node --test tests/*.test.cjs` — a SHELL glob, expanded
+        # by the shell before node sees it. `node --test tests/`, the directory
+        # form this package used to declare, fails on Node 22 with
+        # "Cannot find module '…/native/curve25519/tests'". Node's own glob
+        # support for positional arguments is Node 22+, so the quoted form is
+        # not available to a package whose engines allow 20.
+        run: npm test --prefix native/curve25519
+      - name: Run the documentation gate
+        # docs/verify.mjs executes every `js run` block in README.md,
+        # CHANGELOG.md and docs/, plus every examples/*.mjs, and fails the run
+        # on a non-zero exit. `npm test` does not touch the documentation, so
+        # an example or a signature quoted in prose can go stale indefinitely
+        # without this. Same leg as the suite and for the same reason: every
+        # block loads the native binding, so it has to be loaded first.
+        run: npm run docs:verify --prefix native/curve25519
+      - name: Coverage summary
+        run: |
+          {
+            echo "### node ${{ matrix.node }} — tests + documentation gate, both executed"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| binary | \`x86_64-unknown-linux-gnu\`, built in the \`build\` job, **loaded here** |"
+            echo "| JS suite | \`npm test\`, \`tests/*.test.cjs\` |"
+            echo "| documentation | \`npm run docs:verify\` — every runnable block and example |"
+            echo "| Rust tests | none exist; \`src/lib.rs\` has no \`#[test]\` |"
+            echo "| other four targets | compiled in \`build\`, never loaded |"
+          } >> "$GITHUB_STEP_SUMMARY"

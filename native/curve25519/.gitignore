@@ -1,2 +1,11 @@
 *.node
 target/
+
+# CI-only: the verify job unpacks the build job's platform package here.
+.built/
+
+# docs/verify.mjs writes each runnable block to a dot-prefixed file next to the
+# .md it came from, and removes it in a finally block. This is only here so a
+# run killed mid-block does not leave an untracked file that looks like an
+# example.
+.docs-verify.*
