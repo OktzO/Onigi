@@ -28,6 +28,7 @@ import { existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+// pathToFileURL is used for the import rewrite below
 import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
@@ -87,7 +88,7 @@ if (exampleFiles.length === 0) {
 	failures.push({ label: 'examples/', detail: 'no examples/*.mjs found' });
 }
 for (const name of exampleFiles) {
-	await runOne(name, [pathToFileURL(join(examplesDir, name)).href]);
+	await runOne(name, [join(examplesDir, name)]);
 }
 
 // ------------------------------------------------- runnable blocks in markdown
