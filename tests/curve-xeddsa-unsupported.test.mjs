@@ -14,13 +14,15 @@ import { test } from 'node:test';
  * oktz-signal publishes only signal-linux-{arm64,x64}-{gnu,musl}. In practice
  * that is darwin and win32.
  *
- * Those platforms are unsupported by the library as a whole, not just by curve
- * crypto: lib/Signal/libsignal.js opens with a static
- * `import * as libsignal from 'oktz-signal'`, so a missing oktz-signal prebuild
- * takes down lib/index.js before curve-native.js is ever consulted. That is
- * outside this finding's ownership, so it is documented rather than fixed here.
- *
- * What this file does pin is the contract that matters for curve-native.js
+ * Those platforms are unsupported for XEdDSA, and XEdDSA is what they are
+ * unsupported FOR: lib/Signal/libsignal.js loads the engine lazily, so a missing
+ * oktz-signal prebuild no longer takes down lib/index.js -- it fails at the first
+ * pair-wise E2EE operation instead, with the platform named
+ * (tests/signal-lazy-engine.test.mjs). The group path needs no engine, but
+ * group message signing goes through curve-native.js, so XEdDSA is the limit
+ * that remains for it. That was this file's own ownership boundary, and the
+ * lazy engine is now fixed; what this file pins is the contract that matters
+ * for curve-native.js
  * standing on its own: it must still load, keygen and DH must still work, and
  * XEdDSA must fail LOUDLY -- never return a fabricated signature, never return a
  * verdict it did not compute.

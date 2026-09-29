@@ -32,10 +32,10 @@ import { test } from 'node:test';
  * One simulation artifact, stated plainly: the hook strips the oktz-signal
  * binding only for the subpath curve-native.js requires, not for the relative
  * require inside oktz-signal/index.js. On a real platform with no oktz-signal
- * prebuild the whole library dies earlier and louder, at the static
- * `import * as libsignal from 'oktz-signal'` in lib/Signal/libsignal.js -- so
- * this is the only way to reach lib/Utils/crypto.js and exercise the warn
- * channel at all. tests/curve-xeddsa-unsupported.test.mjs covers the
+ * prebuild the engine is now loaded lazily (tests/signal-lazy-engine.test.mjs),
+ * so lib/Utils/crypto.js imports there too -- but this file still needs the
+ * narrow hook, because the engine's own reach for the binding is the thing it is
+ * leaving alone. tests/curve-xeddsa-unsupported.test.mjs covers the
  * curve-native.js boundary without that artifact.
  */
 
