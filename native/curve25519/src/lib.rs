@@ -17,7 +17,7 @@ use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::constants::ED25519_BASEPOINT_POINT;
 use curve25519_dalek::MontgomeryPoint;
 
-use ed25519_dalek::{VerifyingKey, Signature, Verifier};
+use ed25519_dalek::{Signature, VerifyingKey};
 
 use sha2::{Digest, Sha512};
 
@@ -180,5 +180,10 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
         Ok(v) => v,
         Err(_) => return Ok(false),
     };
-    Ok(vk.verify(&msg, &signature).is_ok())
+    // verify_strict, not verify: the cofactorless equation accepts a forged
+    // signature whenever the public key is a small-order point (u = 0 maps to
+    // the Edwards order-2 point, where R = A, S = 0 verifies for every message
+    // and every key). verify_strict rejects small-order R and weak A. oktz-signal
+    // already does this; the two implementations must stay byte-compatible.
+    Ok(vk.verify_strict(&msg, &signature).is_ok())
 }
