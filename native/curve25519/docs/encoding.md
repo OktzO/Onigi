@@ -123,8 +123,9 @@ console.log('verify(prefixed33.subarray(1)) ->', curve.verify(prefixed33.subarra
 
 `oktz-signal` behaves the same way and for the same reason — its check is
 `check_len(public_key, 32, "public key")?` at the top of
-`native/signal/src/curve.rs:154`, in the sibling checkout. This is what makes
-cross-implementation delegation work only after the prefix is stripped:
+`native/signal/src/curve.rs:154`, in that crate's checkout, which this
+repository does not vendor. This is what makes cross-implementation delegation
+work only after the prefix is stripped:
 
 ```js run
 import assert from 'node:assert/strict';
@@ -378,7 +379,8 @@ function of the secret key alone, and were deterministic. That is a key-recovery
 setup rather than a curiosity: with `sk` fixed, `S = r + h·a` is affine in the
 nonce, so two signatures over chosen messages supply enough equations to recover
 `a` — the hidden-number-problem lattice attack `oktz-signal` documents at
-`native/signal/src/curve.rs:123-126`. **A nonce must never be a function of the
+`native/signal/src/curve.rs:123-126` (in that crate's checkout, which this
+repository does not vendor). **A nonce must never be a function of the
 secret key.** If the CSPRNG cannot be read, `sign` throws rather than fall back
 to a predictable nonce.
 

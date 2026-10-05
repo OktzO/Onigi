@@ -301,15 +301,24 @@ Verified by reading `src/lib.rs` and by running it:
   making a `Scalar` wipe itself — the arithmetic form of the key would
   otherwise sit in freed stack memory for the life of the process.
   Wrapping makes the wipe unconditional on every exit path, including the
-  error return when the CSPRNG cannot be read. Two honest limits, both recorded
-  at `src/lib.rs:204`: it bounds the canonical 32-byte form, not
-  `curve25519-dalek`'s internal limb temporaries, which that crate does not
-  wipe either; and of the four, only `a` and `r` are secret — `h` is
-  `SHA512(R ‖ A ‖ m)` over public values and `S` is published in the signature
-  itself, so those two are wrapped for uniformity rather than necessity.
+  error return when the CSPRNG cannot be read. Two honest limits, both
+  recorded at `src/lib.rs:249`: `&*h * &*a` still materialises the product as
+  an unwiped `Scalar` temporary, because that is the `Mul` impl's return value
+  — harmless here, since `h` is public and `a` is not recoverable from `h·a`
+  without already holding `a`; and `Zeroizing<Scalar>` bounds the canonical
+  32-byte form, not `curve25519-dalek`'s internal limb temporaries, which that
+  crate does not wipe either. Separately, of the four only `a` and `r` are
+  secret — `h` is `SHA512(R ‖ A ‖ m)` over public values and `S` is published in
+  the signature itself, so those two are wrapped for uniformity rather than
+  necessity.
   `curve25519-dalek` and `ed25519-dalek` are both pulled in with the `zeroize`
   feature (`Cargo.toml`). The *unclamped* input `Uint8Array` is not zeroized —
-  it belongs to the caller.
+  it belongs to the caller. One copy of the *clamped* secret does escape:
+  `Scalar::from_bytes_mod_order` takes its 32 bytes **by value**, so the deref
+  at `src/lib.rs:98` materialises an unwiped `[u8; 32]` for the duration of that
+  call. dalek has no `&[u8; 32]`-taking constructor and no restructuring here
+  avoids the by-value call, so that residue is disclosed rather than fixed —
+  it is the only one on the list that is actual secret bytes.
 - **No `unsafe` in the Rust.** `#![deny(unsafe_code)]` is the first line of
   `src/lib.rs`. Verification is delegated to `ed25519-dalek` rather than
   hand-rolled (`src/lib.rs:170-172` says why).
@@ -321,7 +330,8 @@ Verified by reading `src/lib.rs` and by running it:
   message and every key.
   `tests/loworder-forgery.test.cjs` asserts that this package returns `false`
   for exactly that forgery. `oktz-signal` was already strict
-  (`native/signal/src/curve.rs:175-178`).
+  (`native/signal/src/curve.rs:175-178`, in that crate's checkout, which this
+  repository does not vendor).
 - **Scalar arithmetic is constant-time**, because it is `curve25519-dalek`'s,
   not hand-written. The non-scalar work is `sha2`.
 
@@ -340,11 +350,11 @@ function of the secret key alone, and were deterministic. That is a
 key-recovery setup rather than a curiosity: with `sk` fixed, `S = r + h·a` is
 affine in the nonce, so two signatures over chosen messages supply enough
 equations to recover `a` — the hidden-number-problem lattice attack
-`oktz-signal` documents at `native/signal/src/curve.rs:123-126`, and the
-reason that sibling implementation has always taken its nonce from `OsRng`
-when the caller supplies none. This package no longer derives it that way. If
-the CSPRNG cannot be read, `sign` throws rather than fall back to a
-predictable nonce.
+`oktz-signal` documents at `native/signal/src/curve.rs:123-126` (in that
+crate's checkout, which this repository does not vendor), and the reason that
+sibling implementation has always taken its nonce from `OsRng` when the caller
+supplies none. This package no longer derives it that way. If the CSPRNG cannot
+be read, `sign` throws rather than fall back to a predictable nonce.
 
 **Pass a 64-byte nonce only if you need a reproducible signature** — to compare
 against a value another implementation produced, or to pin a test vector. It is

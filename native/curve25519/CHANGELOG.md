@@ -4,9 +4,9 @@ All notable changes to `oktz-curve25519`. This directory is vendored into the
 `Onigi` repository and has its own CI (`.github/workflows/ci.yml` and
 `release.yml`) and its own `napi.config.json`; the commits below are the real
 ones from `git log -- native/curve25519`, and the file lists are the real
-ones in this tree. The two bullets with no hash are the ones in the commit that
-writes this file: a commit cannot contain its own hash, so those two are
-identified by subject rather than by identifier.
+ones in this tree. The two hashless bullets in the `next` section below are
+the ones in the commit that writes this file: a commit cannot contain its own
+hash, so those two are identified by subject rather than by identifier.
 
 The Rust crate's own version is `0.1.0` (`Cargo.toml`); the npm package's is
 `0.0.4`. They are independent.
@@ -33,7 +33,8 @@ below are commit hashes, not version numbers.
   nobody signed. `verify` now calls `vk.verify_strict`
   (`src/lib.rs:201`), which rejects a small-order `R` and a weak `A`.
   `oktz-signal` has been strict at the same point all along
-  (`native/signal/src/curve.rs:175-178`); the two implementations have to agree,
+  (`native/signal/src/curve.rs:175-178`, in that crate's checkout, which this
+  repository does not vendor); the two implementations have to agree,
   because callers fall back between them. Added
   `tests/loworder-forgery.test.cjs`, which asserts `false` for exactly that
   forgery under four messages.
@@ -43,7 +44,8 @@ below are commit hashes, not version numbers.
   `sk` fixed, `S = r + h·a` is affine in the nonce, so two signatures over
   chosen messages give enough equations to recover `a`: the
   hidden-number-problem lattice attack documented at
-  `native/signal/src/curve.rs:123-126`. The `None` arm now fills a 64-byte
+  `native/signal/src/curve.rs:123-126` (in that crate's checkout, which this
+  repository does not vendor). The `None` arm now fills a 64-byte
   buffer from `getrandom` (`src/lib.rs:108-116`). A CSPRNG failure propagates
   out of `sign` rather than falling back to a predictable nonce, so
   `sign_internal` returns `Result` (`src/lib.rs:88`) — and there is no code
@@ -89,15 +91,25 @@ below are commit hashes, not version numbers.
   the by-value form would copy the secrets back out of the guarded buffers. No
   observable behaviour change — the 48-signature explicit-`rnd` grid above was
   re-measured against a build of `0bd9500` and is byte-identical — and the note
-  at `src/lib.rs:204` records what is deliberately *not* covered, including
-  dalek's internal limb temporaries and the caller-owned `Uint8Array`.
+  at `src/lib.rs:204` records what is deliberately *not* covered: dalek's
+  internal limb temporaries, the unwiped `h·a` product, the caller-owned
+  `Uint8Array`, and the one residue that is actual secret bytes —
+  `Scalar::from_bytes_mod_order` takes its 32 bytes by value, so the deref at
+  `src/lib.rs:98` materialises an unwiped `[u8; 32]` of the clamped secret for
+  the duration of that call. dalek offers no `&[u8; 32]` constructor, so that
+  one is disclosed rather than fixed.
 - **Documentation corrected to match.** The README still described
   `sign()` as deterministic, `verify()` as cofactorless, "no test in this
   repository distinguishes the two behaviours", and the nonce mitigation as a
   reader's choice; all four statements were false as of the two commits
   above, and the README's own measured test count said 5 tests in a suite of
   12. Also refreshed the `src/lib.rs:NNN` references that the line shifts
-  left behind, in `README.md`, `docs/api.md` and `docs/encoding.md`.
+  left behind, in `README.md`, `docs/api.md` and `docs/encoding.md`. Two
+  follow-ups in this commit: every citation of
+  `native/signal/src/curve.rs` — a file that is not vendored in this
+  repository — now says so rather than leaving the line number looking
+  verifiable here, and `examples/verify_debug.rs` calls `verify_strict` rather
+  than the cofactorless `Verifier::verify`.
 
 ---
 

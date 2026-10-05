@@ -100,11 +100,11 @@ fn sign_internal(
     let a_bytes = base_mult_scalar(&a);
     let sign_bit = a_bytes[31] & 128;
 
-    // The nonce must come from a CSPRNG. Deriving it as SHA512(sk||m) made
-    // sign() deterministic, so two signatures over chosen messages recovered
-    // the identity key (hidden-number-problem lattice attack). rnd stays
-    // injectable so the libsignal-parity oracle and known-answer vectors can
-    // still pin a fixed nonce — this matches oktz-signal/native/signal/src/curve.rs.
+    // The nonce must come from a CSPRNG: SHA512(sk||m) made sign() deterministic,
+    // so two signatures over chosen messages recovered the identity key
+    // (hidden-number-problem lattice attack). rnd stays injectable so the
+    // parity oracle and known-answer vectors can still pin a fixed nonce, as
+    // oktz-signal's curveSign does (that crate's source is not vendored here).
     let mut generated = [0u8; 64];
     if rnd.is_none() {
         getrandom::getrandom(&mut generated)
@@ -242,8 +242,9 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 //   temporer yang tidak di-wipe, persis yang wrap ini cegah.
 // - `&*r + &*h * &*a` memakai `impl Mul<&Scalar> for &Scalar` (scalar.rs:323)
 //   dan `impl Add<&Scalar> for &Scalar` (scalar.rs:340). Keduanya membaca lewat
-//   reference, jadi `a`, `r`, dan `h` sendiri tidak pernah keluar dari buffer-nya;
-//   yang diambil by-value hanya produk `h * a` lalu jumlahnya (lihat batasannya).
+//   reference, jadi `a`, `r`, dan `h` sendiri tidak pernah keluar dari buffer-nya
+//   sebagai nilai `Scalar`; yang diambil by-value hanya produk `h * a` lalu
+//   jumlahnya (lihat batasannya).
 //
 // Batasnya, jujur:
 //
@@ -263,3 +264,13 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 // `Uint8Array` milik pemanggil, yang tidak boleh disentuh crate ini sama
 // sekali. `s_bytes` juga tidak, tapi itu karena `S` keluar ke caller sebagai
 // signature, bukan karena wipe-nya di-lewatkan.
+//
+// Dan satu residue yang benar-benar byte secret, bukan turunan publik:
+// `Scalar::from_bytes_mod_order` menerima 32 byte itu BY VALUE
+// (curve25519-dalek-4.1.3/src/scalar.rs:237), jadi `*sk` di baris 98 — yang
+// hasil deref dari `Zeroizing<[u8; 32]>` — mematerialisasi salinan `[u8; 32]`
+// dari secret yang sudah di-clamp ke dalam slot argumennya, dan tidak ada yang
+// meng-wipe-nya selama panggilan itu berjalan. dalek tidak punya konstruktor
+// yang menerima `&[u8; 32]`, dan tidak ada penataan ulang di file ini yang
+// menghindari panggilan by-value tersebut, jadi residue ini dicatat, bukan
+// diperbaiki.
