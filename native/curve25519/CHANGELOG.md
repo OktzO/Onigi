@@ -4,10 +4,100 @@ All notable changes to `oktz-curve25519`. This directory is vendored into the
 `Onigi` repository and has its own CI (`.github/workflows/ci.yml` and
 `release.yml`) and its own `napi.config.json`; the commits below are the real
 ones from `git log -- native/curve25519`, and the file lists are the real
-ones in this tree.
+ones in this tree. The two bullets with no hash are the ones in the commit that
+writes this file: a commit cannot contain its own hash, so those two are
+identified by subject rather than by identifier.
 
 The Rust crate's own version is `0.1.0` (`Cargo.toml`); the npm package's is
 `0.0.4`. They are independent.
+
+---
+
+## next — the fixes after 0.0.4, none of them published
+
+**Nothing in this section is on npm, and the version number has not moved.**
+`package.json` still says `0.0.4`, which is the version the registry serves
+today, and that artifact contains none of these fixes. Two of them change
+observable behaviour, so publishing this tree under the existing `0.0.4` would
+ship a signature-nonce change and a verification change as a patch release.
+Whoever publishes this needs a version that is not `0.0.4`. The identifiers
+below are commit hashes, not version numbers.
+
+- **`fcf1cf9` — `fix(curve): verify XEdDSA with verify_strict, not the
+  cofactorless equation`.** `verify` called `ed25519-dalek`'s cofactorless
+  `vk.verify`. That equation accepts a forged signature whenever the public key
+  is a small-order point: `u = 0` converts through `MontgomeryPoint::to_edwards`
+  to the Edwards order-2 point `(0, -1)`, for which `R = A, S = 0` satisfies
+  `[S]B = R + [k]A` for **every** message and **every** key. So a caller that
+  was handed a bogus 32-byte "public key" got `true` back for a signature
+  nobody signed. `verify` now calls `vk.verify_strict`
+  (`src/lib.rs:201`), which rejects a small-order `R` and a weak `A`.
+  `oktz-signal` has been strict at the same point all along
+  (`native/signal/src/curve.rs:175-178`); the two implementations have to agree,
+  because callers fall back between them. Added
+  `tests/loworder-forgery.test.cjs`, which asserts `false` for exactly that
+  forgery under four messages.
+- **`958c3a5` — `fix(curve): draw the XEdDSA nonce from a CSPRNG instead of
+  SHA512(sk‖m)`.** With no third argument, `sign` derived the nonce as
+  `SHA512(sk ‖ m) mod L` — a deterministic function of the secret key. With
+  `sk` fixed, `S = r + h·a` is affine in the nonce, so two signatures over
+  chosen messages give enough equations to recover `a`: the
+  hidden-number-problem lattice attack documented at
+  `native/signal/src/curve.rs:123-126`. The `None` arm now fills a 64-byte
+  buffer from `getrandom` (`src/lib.rs:108-116`). A CSPRNG failure propagates
+  out of `sign` rather than falling back to a predictable nonce, so
+  `sign_internal` returns `Result` (`src/lib.rs:88`) — and there is no code
+  path on which a fixed or zero nonce can be produced.
+  - **`sign()` output is randomised, which is a behavioural break.** Two calls
+    with one key over one message no longer return the same 64 bytes. Measured
+    on this tree over 64 distinct keypairs: 0/64 pairs came back
+    byte-identical, where every pair previously did. Anything that relied on
+    reproducible output must now pass a 64-byte `opt_random` — see
+    [docs/encoding.md §6](docs/encoding.md#6-the-nonce-is-random-unless-you-pin-it).
+  - The `Some(rnd)` arm is untouched. 48 explicit-`rnd` signatures over
+    4 keys × 4 nonces × 3 messages are byte-identical to the previous build,
+    which is what keeps this crate wire-compatible with
+    `curve25519-js@0.0.4` / `libsignal` / WhatsApp. Within this tree the
+    pinning is the three known-answer vectors in
+    `tests/nonce-randomness.test.cjs`.
+  - `getrandom 0.2.17` was already in `Cargo.lock` via `rand_core`; this
+    promotes it to a direct dependency. No new package, no version change.
+    `curve25519-dalek` stays 4.1.3, `ed25519-dalek` 2.2.0, `sha2` 0.10.9.
+- **`0bd9500` — `test(curve): pin the wire-compatible signature to
+  curve25519-js@0.0.4 bytes`.** The test then called "libsignal parity"
+  compared two `sign()` calls *inside one build*, which pins determinism, not
+  identity with the wire value: editing the nonce domain separation, the
+  challenge hash or `clamp_scalar` changes every signature and it still
+  passed. It now asserts three known-answer vectors whose expected bytes were
+  cross-checked byte for byte across `curve25519-js@0.0.4`, `oktz-signal`'s
+  native `curveSign`, and this crate. The vectors vary the clamped key bits,
+  the nonce bytes and the message length, including the empty message.
+- **Secret `Scalar` temporaries are zeroized.** `curve25519-dalek`'s `Scalar`
+  has a manual `Zeroize` impl and **no `Drop` impl**, so the `zeroize` feature
+  already enabled in `Cargo.toml` makes `scalar.zeroize()` callable without
+  making a `Scalar` wipe itself. Only the raw clamped 32-byte secret was in a
+  `Zeroizing` buffer; the arithmetic form of the key — `a` and `r` in
+  `sign_internal` — was left on the napi/worker stack after the call returned,
+  for the life of the process. All four scalars are now wrapped in `Zeroizing`
+  (`src/lib.rs:98`, `src/lib.rs:113`, `src/lib.rs:122`, `src/lib.rs:127`)
+  rather than zeroized by hand at chosen points, which makes the wipe
+  unconditional on every exit path — including the CSPRNG error return the
+  previous entry added. `h` and `s` are wrapped too, though neither is secret
+  (`h = SHA512(R ‖ A ‖ m)` over public values, `S` is published in the
+  signature); the rule is uniform rather than per-variable. The arithmetic is
+  written `&*r + &*h * &*a`, not `*r + *h * *a`, because `Scalar` is `Copy` and
+  the by-value form would copy the secrets back out of the guarded buffers. No
+  observable behaviour change — the 48-signature explicit-`rnd` grid above was
+  re-measured against a build of `0bd9500` and is byte-identical — and the note
+  at `src/lib.rs:204` records what is deliberately *not* covered, including
+  dalek's internal limb temporaries and the caller-owned `Uint8Array`.
+- **Documentation corrected to match.** The README still described
+  `sign()` as deterministic, `verify()` as cofactorless, "no test in this
+  repository distinguishes the two behaviours", and the nonce mitigation as a
+  reader's choice; all four statements were false as of the two commits
+  above, and the README's own measured test count said 5 tests in a suite of
+  12. Also refreshed the `src/lib.rs:NNN` references that the line shifts
+  left behind, in `README.md`, `docs/api.md` and `docs/encoding.md`.
 
 ---
 
@@ -85,8 +175,9 @@ throws `Cannot find native binding` at `require()` time.
 
 ## Fixed in this tree, after 0.0.4
 
-Documentation and CI only. No `src/**`, `Cargo.toml`, `npm/**` or
-`native-loader.cjs` change is part of it.
+Documentation and CI only. No `Cargo.toml`, `npm/**` or `native-loader.cjs`
+change is part of it, and no `src/**` change: the library fixes are the
+`next` section above, and the two are not the same work.
 
 - **`npm test` now works on Node 22.** It was `node --test tests/`, which on
   Node 22.23.3 fails with
@@ -118,33 +209,29 @@ Documentation and CI only. No `src/**`, `Cargo.toml`, `npm/**` or
 ## Known issues, not fixed here
 
 Recorded because they are properties of the code and a reader needs them. No
-library source was modified.
+library source was modified for any of the six below — they are still open
+after the `next` section above.
 
 1. **The five platform packages are unpublished.** Every
    `@oktz-curve25519/curve25519-*` is a `404`. The layout this tree
    describes cannot work for an installed consumer.
-2. **`sign()` derives the nonce as `SHA512(sk ‖ m)` when none is supplied**
-   (`src/lib.rs:54-60`), so it is deterministic. `oktz-signal` replaced the
-   same derivation with a CSPRNG nonce precisely because of this
-   (`native/signal/src/curve.rs:123-126`). Callers who want the property
-   should pass a 64-byte `opt_random`. Not fixed here: the source is
-   explicitly out of scope for documentation work, and changing the nonce
-   derivation changes every signature this package produces.
-3. **`verify()` uses the cofactorless check** (`vk.verify`, `src/lib.rs:183`)
-   where `oktz-signal` uses `vk.verify_strict` (`native/signal/src/curve.rs:178`).
-   No test distinguishes the two.
-4. **`generateKeyPair(seed)` ignores `seed`.** The parameter is named `seed`,
+2. **The version number does not describe the artifact.** `package.json` is
+   still `0.0.4`, and `0.0.4` on npm is a single-prebuild package built before
+   every entry in this file. There is no version under which the fixes above
+   have been released, so a tree-based build and an `npm install` of the same
+   version number are not the same program.
+3. **`generateKeyPair(seed)` ignores `seed`.** The parameter is named `seed`,
    is validated as one, and is discarded (`index.cjs:29-31` says so in its own
    docstring). The published `0.0.4` has the identical function, so this is not
    a regression introduced by the multi-prebuild work.
-5. **`ci.yml` and `release.yml` reference `native/curve25519/…` paths and run
+4. **`ci.yml` and `release.yml` reference `native/curve25519/…` paths and run
    root `npm ci`.** That is the invocation convention of the enclosing
    `Onigi` repository. Copied out as a standalone repository the paths do not
    resolve and there is no root lockfile. Both workflows are therefore inert
    where they sit, because GitHub only reads `.github/workflows/` at a
    repository root.
-6. **No `LICENSE` file in this directory**, while `package.json` declares MIT.
-7. **No TypeScript definitions ship.** No `types` field, no `types` entry in
+5. **No `LICENSE` file in this directory**, while `package.json` declares MIT.
+6. **No TypeScript definitions ship.** No `types` field, no `types` entry in
    `napi.config.json`, and a generated `.d.ts` would not be in `files`.
 
 ---
@@ -153,7 +240,7 @@ library source was modified.
 
 | Version | On npm | In this tree |
 |---|---|---|
-| `0.0.4` | yes — single prebuild, no `optionalDependencies` | the multi-prebuild loader, unfixed since |
+| `0.0.4` | yes — single prebuild, no `optionalDependencies` | the multi-prebuild loader; the fixes above are **not** under this version |
 | `0.0.4-native.1` | yes — a prerelease of the above | — |
 | `1.0.0` | yes — same single-prebuild layout | — |
 | next | **never published** | this tree |

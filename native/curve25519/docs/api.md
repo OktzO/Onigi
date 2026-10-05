@@ -38,7 +38,7 @@ named exports. They are the same two functions `index.cjs:67-80` wraps.
 
 ### `sign(secretKey, msg[, opt_random]) → Uint8Array` (64 bytes)
 
-XEdDSA signature. `index.cjs:67-73`, `src/lib.rs:148-159`.
+XEdDSA signature. `index.cjs:67-73`, `src/lib.rs:151-162`.
 
 | Parameter | Type | Length | Notes |
 |---|---|---|---|
@@ -50,7 +50,7 @@ Returns a `Uint8Array` of 64 bytes, `R ‖ S`. Throws `Error: wrong secret key
 length`, `Error: wrong random data length`, or
 `TypeError: unexpected type, use Uint8Array`.
 
-**The secret key is clamped inside the addon** (`src/lib.rs:46-53`, RFC 7748:
+**The secret key is clamped inside the addon** (`src/lib.rs:46-52`, RFC 7748:
 `sk[0] &= 248; sk[31] &= 127; sk[31] |= 64`). You do not clamp it yourself,
 and you cannot observe the clamped value. Note the consequence: two different
 32-byte secrets that differ only in the clamped bits produce the **same**
@@ -66,13 +66,13 @@ a signature another system produced, you must have its nonce — see
 [encoding.md §6](encoding.md#6-the-nonce-is-random-unless-you-pin-it) for why
 the default is a CSPRNG rather than a function of the key.
 
-The returned `Uint8Array` is a fresh copy (`src/lib.rs:158` builds a new
+The returned `Uint8Array` is a fresh copy (`src/lib.rs:161` builds a new
 `Vec`), not a view over the addon's memory. `Buffer.from(sig)` is safe if you
 want a `Buffer` for another API.
 
 ### `verify(publicKey, msg, signature) → boolean`
 
-XEdDSA verification. `index.cjs:76-80`, `src/lib.rs:161-184`.
+XEdDSA verification. `index.cjs:76-80`, `src/lib.rs:173-202`.
 
 | Parameter | Type | Length |
 |---|---|---|
@@ -84,8 +84,8 @@ Returns `true` or `false`. **Never throws for a wrong-length key or
 signature** — that is a throw, from `index.cjs:77-78`. Returns `false`, never
 throws, when the signature does not match, when the message differs, when the
 key differs, and when the 32-byte public key has no Edwards preimage
-(`src/lib.rs:169-172`) or is not a valid `VerifyingKey`
-(`src/lib.rs:179-182`).
+(`src/lib.rs:182-185`) or is not a valid `VerifyingKey`
+(`src/lib.rs:192-195`).
 
 A `false` tells you nothing about *which* of those happened. There is no
 error code, no reason string, no out-parameter. If you need to distinguish
@@ -206,7 +206,7 @@ nothing else (`native-loader.cjs:781-782`). They take `Uint8Array` for every
 argument including the message, return a `Buffer` for `sign` and a boolean for
 `verify`, and report wrong lengths as
 `Error: wrong public key length: 33 (expected 32)` — the Rust text, from
-`src/lib.rs:31-41`, with the lengths included.
+`src/lib.rs:32-42`, with the lengths included.
 
 There is no reason to do this except in a test that wants to prove the JS
 wrapper's checks exist.

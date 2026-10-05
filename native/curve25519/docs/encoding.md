@@ -11,15 +11,15 @@ an exception instead of a `false`. All of it is read from `index.cjs` and
 
 | Thing | Length | Enforced in |
 |---|---|---|
-| secret key (X25519 private scalar) | 32 | `index.cjs:68` (`sign`), `index.cjs:52` (`sharedKey`), `src/lib.rs:140` |
-| public key (X25519 `u` coordinate) | 32 | `index.cjs:77` (`verify`), `index.cjs:51` (`sharedKey`), `src/lib.rs:162` |
-| signature (`R ‖ S`) | 64 | `index.cjs:78`, `src/lib.rs:163` |
-| `opt_random` nonce | 64 | `index.cjs:70`, `src/lib.rs:143` |
+| secret key (X25519 private scalar) | 32 | `index.cjs:68` (`sign`), `index.cjs:52` (`sharedKey`), `src/lib.rs:153` |
+| public key (X25519 `u` coordinate) | 32 | `index.cjs:77` (`verify`), `index.cjs:51` (`sharedKey`), `src/lib.rs:175` |
+| signature (`R ‖ S`) | 64 | `index.cjs:78`, `src/lib.rs:176` |
+| `opt_random` nonce | 64 | `index.cjs:70`, `src/lib.rs:156` |
 | `generateKeyPair` seed | 32 | `index.cjs:33` |
 
 Every one of these is checked **twice** — once in `index.cjs`'s `checkLen`
 before the call crosses into the addon, and again in Rust's `check_len`
-(`src/lib.rs:31-41`). The JavaScript check is the one that fires, so the
+(`src/lib.rs:32-42`). The JavaScript check is the one that fires, so the
 message a caller sees comes from `index.cjs:22-25` and does not name the
 lengths:
 
@@ -184,23 +184,23 @@ order `L ≈ 2^252`, so it occupies 252 bits and its top four bits are zero.
 The bit that is *not* part of `S` is bit 7 of byte 63: the sign bit of the
 public key, transported inside the signature.
 
-**Sign** — `src/lib.rs:99` reads it off the compressed public key and
-`src/lib.rs:121` writes it in:
+**Sign** — `src/lib.rs:101` reads it off the compressed public key and
+`src/lib.rs:134` writes it in:
 
 ```js illustrative
-let sign_bit = a_bytes[31] & 128;   // src/lib.rs:99
+let sign_bit = a_bytes[31] & 128;   // src/lib.rs:101
 // …
-sig[32..64].copy_from_slice(&s_bytes);  // src/lib.rs:119
-sig[63] |= sign_bit;                    // src/lib.rs:121
+sig[32..64].copy_from_slice(&s_bytes);  // src/lib.rs:132
+sig[63] |= sign_bit;                    // src/lib.rs:134
 ```
 
-**Verify** — `src/lib.rs:168` reads it back out to reconstruct the Edwards
-public key, and `src/lib.rs:176` clears it to recover the real `S`:
+**Verify** — `src/lib.rs:181` reads it back out to reconstruct the Edwards
+public key, and `src/lib.rs:189` clears it to recover the real `S`:
 
 ```js illustrative
-let sign_bit = sig[63] & 128;            // src/lib.rs:168
+let sign_bit = sig[63] & 128;            // src/lib.rs:181
 let a_bytes = match pubkey_montgomery_to_edwards(&pk, sign_bit >> 7) { … };
-sig_clean[63] &= 127;                    // src/lib.rs:176
+sig_clean[63] &= 127;                    // src/lib.rs:189
 ```
 
 Consequences a caller can observe:
@@ -266,14 +266,14 @@ console.log('a toggled bit 7 never verifies; a masked bit 7 only matters when it
 This is not an encoding choice you can make differently at the call site, but
 it explains the sizes. X25519 public keys are the Montgomery form: 32 bytes
 holding the `u` coordinate. `verify()` converts to Edwards internally with
-`MontgomeryPoint::to_edwards` (`src/lib.rs:127-130`) and hands the result to
+`MontgomeryPoint::to_edwards` (`src/lib.rs:140-143`) and hands the result to
 `ed25519-dalek`.
 
 The conversion can fail — a `u` with no Edwards preimage — and when it does,
-`verify()` returns `false` rather than throwing (`src/lib.rs:169-172`):
+`verify()` returns `false` rather than throwing (`src/lib.rs:182-185`):
 
 ```js illustrative
-// src/lib.rs:169-172
+// src/lib.rs:182-185
 let a_bytes = match pubkey_montgomery_to_edwards(&pk, sign_bit >> 7) {
     Some(p) => p.compress().to_bytes(),
     None => return Ok(false),

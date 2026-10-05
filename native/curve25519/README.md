@@ -258,9 +258,9 @@ Full version with citations: [docs/encoding.md](docs/encoding.md).
   `false` never says which.
 - Byte 63 of the signature carries the public key's sign bit in bit 7; the
   scalar `S` below it leaves bits 4-6 clear, because `S < L < 2^252`
-  (`src/lib.rs:99`, `src/lib.rs:121`, and the reverse at `src/lib.rs:168-176`).
+  (`src/lib.rs:101`, `src/lib.rs:134`, and the reverse at `src/lib.rs:181-189`).
 - A 32-byte value that is not a real public key returns `false`, not a throw
-  (`src/lib.rs:169-172`).
+  (`src/lib.rs:182-185`).
 
 ---
 
@@ -268,9 +268,10 @@ Full version with citations: [docs/encoding.md](docs/encoding.md).
 
 **This package is unaudited.** There is no external security assessment of
 this code, no third-party cryptographer has reviewed it, and nothing in this
-repository constitutes one. The tests here are round-trip and rejection tests
-written by the same person who wrote the implementation. Nothing below is a
-claim that it is safe; it is a list of what the code does, so you can decide.
+repository constitutes one. The tests here are round-trip, rejection and
+known-answer tests written by the same person who wrote the implementation.
+Nothing below is a claim that it is safe; it is a list of what the code does,
+so you can decide.
 
 ### What this primitive is for
 
@@ -290,36 +291,69 @@ to the key it claims to. It is **not**:
 
 Verified by reading `src/lib.rs` and by running it:
 
-- **Secret keys are zeroized.** The clamped secret is wrapped in `zeroize::Zeroizing`
-  (`src/lib.rs:94`, `src/lib.rs:146`), and `curve25519-dalek` and
-  `ed25519-dalek` are both pulled in with the `zeroize` feature
-  (`Cargo.toml`). The *unclamped* input `Uint8Array` is not zeroized — it
-  belongs to the caller.
+- **Secret keys are zeroized, in both representations.** The clamped 32-byte
+  secret is held in a `zeroize::Zeroizing` buffer (`src/lib.rs:94`,
+  `src/lib.rs:159`), and so is every `Scalar` the signing path materialises —
+  `a`, `r`, `h` and `s` in `sign_internal` (`src/lib.rs:98`, `src/lib.rs:113`,
+  `src/lib.rs:122`, `src/lib.rs:127`). The wrap is the substance here, not the
+  style: `curve25519-dalek`'s `Scalar` has a manual `Zeroize` impl and **no
+  `Drop`**, so the `zeroize` feature makes `scalar.zeroize()` callable without
+  making a `Scalar` wipe itself — the arithmetic form of the key would
+  otherwise sit in freed stack memory for the life of the process.
+  Wrapping makes the wipe unconditional on every exit path, including the
+  error return when the CSPRNG cannot be read. Two honest limits, both recorded
+  at `src/lib.rs:204`: it bounds the canonical 32-byte form, not
+  `curve25519-dalek`'s internal limb temporaries, which that crate does not
+  wipe either; and of the four, only `a` and `r` are secret — `h` is
+  `SHA512(R ‖ A ‖ m)` over public values and `S` is published in the signature
+  itself, so those two are wrapped for uniformity rather than necessity.
+  `curve25519-dalek` and `ed25519-dalek` are both pulled in with the `zeroize`
+  feature (`Cargo.toml`). The *unclamped* input `Uint8Array` is not zeroized —
+  it belongs to the caller.
 - **No `unsafe` in the Rust.** `#![deny(unsafe_code)]` is the first line of
   `src/lib.rs`. Verification is delegated to `ed25519-dalek` rather than
-  hand-rolled (`src/lib.rs:157-159` says why).
+  hand-rolled (`src/lib.rs:170-172` says why).
+- **`verify()` uses the strict equation.** `src/lib.rs:201` calls
+  `vk.verify_strict(...)`, not the cofactorless `vk.verify(...)`. That is not a
+  stylistic choice: the cofactorless equation accepts a forged signature
+  whenever the public key is a small-order point, because `u = 0` maps to the
+  Edwards order-2 point, where `R = A, S = 0` satisfies the equation for every
+  message and every key.
+  `tests/loworder-forgery.test.cjs` asserts that this package returns `false`
+  for exactly that forgery. `oktz-signal` was already strict
+  (`native/signal/src/curve.rs:175-178`).
 - **Scalar arithmetic is constant-time**, because it is `curve25519-dalek`'s,
   not hand-written. The non-scalar work is `sha2`.
 
-### Two things a caller should know before using it
+### One thing a caller should know before using it
 
-**1. `sign()` with no third argument is deterministic.** The nonce is
-`SHA512(sk ‖ m) mod L` (`src/lib.rs:54-60`). The same key and message always
-produce a byte-identical signature. Measured: 2/2 identical, and 64/64
-distinct keypairs produce 34 signatures with bit 7 set and 30 without — the
-determinism is in `R` and `S`, the sign bit is the public key's.
+**`sign()` is randomised unless you pin the nonce.** With no third argument the
+nonce is 64 bytes from the platform CSPRNG (`src/lib.rs:108-116`), so two calls
+with the same key over the same message return different signatures. Measured
+on this tree: over 64 distinct keypairs, 0/64 pairs of no-nonce signatures came
+back byte-identical. Bit 7 of byte 63 is the public key's, not the nonce's —
+across 16 no-nonce signatures per key over those same 64 keys, 0/64 keys ever
+changed it.
 
-The sibling implementation in this workspace, `oktz-signal`, deliberately
-does **not** do this. Its `curve_sign` takes the nonce from `OsRng` when
-caller supplies none, and the reason is written in its source
-(`native/signal/src/curve.rs:123-126`): deriving the nonce from the key and
-message makes two signatures over chosen messages sufficient to recover the
-identity key via a lattice attack. This package still carries the
-deterministic derivation.
+Earlier versions of this package defaulted to `r = SHA512(sk ‖ m) mod L`, a
+function of the secret key alone, and were deterministic. That is a
+key-recovery setup rather than a curiosity: with `sk` fixed, `S = r + h·a` is
+affine in the nonce, so two signatures over chosen messages supply enough
+equations to recover `a` — the hidden-number-problem lattice attack
+`oktz-signal` documents at `native/signal/src/curve.rs:123-126`, and the
+reason that sibling implementation has always taken its nonce from `OsRng`
+when the caller supplies none. This package no longer derives it that way. If
+the CSPRNG cannot be read, `sign` throws rather than fall back to a
+predictable nonce.
 
-**If that matters to you, pass a 64-byte nonce.** It is the third argument,
-and that path hashes it with a distinct prefix so it cannot collide with the
-deterministic one (`src/lib.rs:63-72`):
+**Pass a 64-byte nonce only if you need a reproducible signature** — to compare
+against a value another implementation produced, or to pin a test vector. It is
+the third argument, and that path hashes it under a distinct prefix,
+`SHA512(0xfe ‖ 0xff×31 ‖ sk ‖ m ‖ rnd) mod L` (`src/lib.rs:55-64`), which is
+the derivation `curve25519-js@0.0.4`, `libsignal` and WhatsApp use — so it is
+also what keeps this package byte-compatible with them. A nonce you pass in
+determines the output; a nonce left out does not. Two caller-supplied nonces
+over one key and one message:
 
 ```js run
 import assert from 'node:assert/strict';
@@ -340,22 +374,6 @@ assert.equal(curve.verify(kp.public, message, first), true);
 assert.equal(curve.verify(kp.public, message, second), true);
 console.log('two random 64-byte nonces -> two different signatures, both valid');
 ```
-
-I am not telling you the deterministic path is exploitable here — that is a
-cryptanalyst's call, not a README's, and no test in this tree covers it. I am
-telling you the derivation is there and that the one-line mitigation is
-available to you.
-
-**2. `verify()` uses the cofactorless check, not the strict one.**
-`src/lib.rs:183` calls `vk.verify(...)`. `oktz-signal` calls
-`vk.verify_strict(...)` at the same place, with a comment giving its reason:
-the cofactorless equation accepts low-order keys and low-order `R`, which
-would let a forged signature pass (`native/signal/src/curve.rs:175-178`).
-Both verify this package's signatures correctly — that is cross-checked in
-`examples/01-sign-verify.mjs` — but the two implementations are not
-equivalent in what they *reject*. **No test in this repository distinguishes
-the two behaviours**, so treat this as a known difference rather than a
-resolved question.
 
 ### Rejection surface, measured
 
@@ -385,7 +403,7 @@ cp target/release/libcurve25519_rs.so \
    native/curve25519/curve25519.linux-x64-gnu.node
 
 # measured on this tree, Node 22.23.3, linux-x64-gnu:
-npm test            # 5 passed, 0 failed, 2 files
+npm test            # 12 passed, 0 failed, 4 files
 npm run docs:verify # 20 code blocks + 4 examples, 0 failures
 ```
 

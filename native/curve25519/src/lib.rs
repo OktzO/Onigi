@@ -93,7 +93,9 @@ fn sign_internal(
     // Zeroizing: wipe clamped secret saat drop (stack/error path sekalipun).
     let sk = Zeroizing::new(clamp_scalar(sk_raw));
     // scalar a untuk pubkey & S. JS pakai byte mentah (mod L), sama saja.
-    let a = Scalar::from_bytes_mod_order(*sk);
+    // Zeroizing juga di sini: Scalar dalek tidak punya Drop (lihat catatan
+    // zeroization di akhir file), jadi r/h/s di bawah ikut dibungkus.
+    let a = Zeroizing::new(Scalar::from_bytes_mod_order(*sk));
     // A = a*B (Edwards), packed. signBit = A[31] & 128.
     let a_bytes = base_mult_scalar(&a);
     let sign_bit = a_bytes[31] & 128;
@@ -108,19 +110,21 @@ fn sign_internal(
         getrandom::getrandom(&mut generated)
             .map_err(|_| "no CSPRNG available for the XEdDSA nonce".to_string())?;
     }
-    let r = match rnd {
+    let r = Zeroizing::new(match rnd {
         Some(rnd) => nonce_rnd(&sk, msg, rnd),
         None => nonce_rnd(&sk, msg, &generated),
-    };
+    });
 
     // R = r*B, packed
     let r_bytes = base_mult_scalar(&r);
 
     // h = SHA512(R || A || msg)
-    let h = challenge(&r_bytes, &a_bytes, msg);
+    let h = Zeroizing::new(challenge(&r_bytes, &a_bytes, msg));
 
-    // S = r + h*a mod L
-    let s = r + h * a;
+    // S = r + h*a mod L. `&*r + &*h * &*a`, bukan `*r + *h * *a`: Scalar-nya Copy,
+    // jadi bentuk by-value menyalin r/h/a keluar dari buffer Zeroizing, sedangkan
+    // `r + h * a` sendiri tidak compile — Zeroizing tak meneruskan operator.
+    let s = Zeroizing::new(&*r + &*h * &*a);
     let s_bytes = s.to_bytes();
 
     let mut sig = [0u8; 64];
@@ -196,3 +200,66 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
     // already does this; the two implementations must stay byte-compatible.
     Ok(vk.verify_strict(&msg, &signature).is_ok())
 }
+
+// --- catatan zeroization ---
+//
+// Dua lapis yang berbeda, dan hanya yang pertama yang otomatis:
+//
+// 1. `sk` — byte secret yang sudah di-clamp, 32 byte — di `Zeroizing<[u8; 32]>`
+//    (baris 94 dan 159). Wipe-nya benar-benar otomatis: `Zeroizing` punya
+//    `Drop` (zeroize-1.9.0/src/lib.rs:696) yang memanggil `Z::zeroize`.
+// 2. `a`, `r`, `h`, `s` — representasi aritmetika. `curve25519_dalek::Scalar`
+//    (curve25519-dalek-4.1.3/src/scalar.rs:195) hanya `#[derive(Copy, Clone,
+//    Hash)]`; `impl Zeroize for Scalar` ada di baris 556 dan TIDAK ada
+//    `impl Drop`. Fitur `zeroize` di Cargo.toml membuat `scalar.zeroize()` bisa
+//    dipanggil, tidak membuat `Scalar` menghapus dirinya sendiri.
+//
+// Yang secret-derived adalah `a` dan `r`. `h` dan `s` juga dibungkus, meski
+// keduanya bukan rahasia: `h = SHA512(R ‖ A ‖ m)`, dan R serta A sudah keluar ke
+// caller (A sebagai public key, R sebagai paruh signature) sementara `m` adalah
+// data pemanggil — jadi `h` publik, begitu juga `S` karena ada di signature.
+// Biayanya 32 byte stack dan satu wipe masing-masing, dan aturan "dibungkus,
+// bukan `.zeroize()` manual" jadi jelas untuk turunan berikutnya.
+//
+// Dibungkus, bukan diberi `.zeroize()` di titik-titik pilihan: pembungkus
+// membuat wipe terjadi di SETIEMAP jalur keluar — termasuk `?` CSPRNG di
+// baris 111 dan error yang dipropagasikan `sign` di baris 160 — tanpa harus
+// mengingat setiap `return`. Length check di baris 153/156 bukan contoh:
+// keduanya jalan sebelum ada salinan secret di sisi Rust, dan `Uint8Array`
+// pemanggil tetap milik pemanggil.
+//
+// Kenapa `&*r + &*h * &*a`, bukan bentuk by-value:
+//
+// - `r + h * a` TIDAK compile. `Zeroizing` tidak mengimplementasikan
+//   Mul/Add sama sekali (zeroize-1.9.0 hanya punya Deref, DerefMut, AsRef,
+//   AsMut, Zeroize, ZeroizeOnDrop, Drop, Clone, From), dan operator tidak
+//   melakukan autoderef: `error[E0369]: cannot multiply Zeroizing<Scalar> by
+//   Zeroizing<Scalar>`. Jadi di sini tidak ada "bentuk by-value yang diam-diam
+//   menyalin" — bentuk itu memang tidak ada.
+// - `*r + *h * *a` compile TANPA warning, karena `Scalar: Copy` dan dalek
+//   mengimplementasikan `Mul<Scalar> for Scalar` (scalar.rs:330 lewat
+//   `define_mul_variants!`). Itu yang berbahaya: ketiga secret disalin ke
+//   temporer yang tidak di-wipe, persis yang wrap ini cegah.
+// - `&*r + &*h * &*a` memakai `impl Mul<&Scalar> for &Scalar` (scalar.rs:323)
+//   dan `impl Add<&Scalar> for &Scalar` (scalar.rs:340). Keduanya membaca lewat
+//   reference, jadi `a`, `r`, dan `h` sendiri tidak pernah keluar dari buffer-nya;
+//   yang diambil by-value hanya produk `h * a` lalu jumlahnya (lihat batasannya).
+//
+// Batasnya, jujur:
+//
+// - Produk `h * a` tetap dimaterialisasi sebagai `Scalar` sementara yang tidak
+//   di-wipe — itu return value dari impl `Mul` di atas, dan tidak bisa dihindari
+//   tanpa memanggil `.zeroize()` manual pada hasilnya. Tidak masalah: `h`
+//   publik, jadi yang tertinggal adalah `h·a`, dan `a` tidak dapat diambil dari
+//   `h·a` tanpa sudah memegang `a`. Yang berbahaya adalah salinan `a`/`r`.
+// - Di dalam dalek, `Scalar::unpack()` (scalar.rs:1119) dan operasi limbanya
+//   membuat `UnpackedScalar` sementara yang dalek sendiri tidak zeroize (yang
+//   di-wipe hanya scratch `batch_invert`, scalar.rs:834). `Zeroizing<Scalar>`
+//   menjaga representasi kanonik 32 byte; ia tidak bisa menjangkau ke dalam
+//   dalek. Jadi ini membatasi residue, bukan menjamin "tidak ada sisa".
+//
+// Yang TIDAK dibungkus: `generated` (64 byte dari CSPRNG, bukan turunan
+// secret — tidak rahasia), `a_bytes`/`r_bytes` (koordinat publik), dan
+// `Uint8Array` milik pemanggil, yang tidak boleh disentuh crate ini sama
+// sekali. `s_bytes` juga tidak, tapi itu karena `S` keluar ke caller sebagai
+// signature, bukan karena wipe-nya di-lewatkan.

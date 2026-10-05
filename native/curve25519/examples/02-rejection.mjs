@@ -31,7 +31,7 @@ const cases = [
 	['a flipped bit in S (signature byte 63)', flip(signature, 63)],
 	['the sign bit toggled in byte 63', (() => {
 		// Toggle, not clear. verify() reads bit 7 to rebuild the Edwards
-		// public key (src/lib.rs:168), so flipping it names a different key
+		// public key (src/lib.rs:181), so flipping it names a different key
 		// and the signature cannot match. Clearing a bit that is already clear
 		// is a no-op, and the signature still verifies — that is the trap this
 		// case is written to avoid.
