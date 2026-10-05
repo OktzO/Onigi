@@ -6,8 +6,9 @@
 // zero binary tambahan untuk yang Node sudah punya.
 //
 // Implementasi XEdDSA = BUKAN Ed25519 standar: konversi Montgomery↔Edwards,
-// secret key dipakai langsung di hash (r = SHA512(sk||m)), sign bit di byte
-// signature[63]. Port manual bit-exact di atas curve25519-dalek (constant-time).
+// secret key dipakai langsung di hash (r = SHA512(0xfe 0xff*31 || sk || m
+// || rnd), rnd dari CSPRNG), sign bit di byte signature[63].
+// Port manual bit-exact di atas curve25519-dalek (constant-time).
 
 use napi_derive::napi;
 use napi::bindgen_prelude::*;
@@ -50,15 +51,6 @@ fn clamp_scalar(sk: &[u8; 32]) -> [u8; 32] {
     a
 }
 
-/// r = SHA512(sk || m) mod L  → Scalar (crypto_sign_direct)
-fn nonce_direct(sk: &[u8; 32], msg: &[u8]) -> Scalar {
-    let mut h = Sha512::new();
-    h.update(sk);
-    h.update(msg);
-    let digest: [u8; 64] = h.finalize().into();
-    Scalar::from_bytes_mod_order_wide(&digest)
-}
-
 /// r = SHA512(0xfe 0xff*31 || sk || m || rnd) mod L (crypto_sign_direct_rnd)
 fn nonce_rnd(sk: &[u8; 32], msg: &[u8], rnd: &[u8]) -> Scalar {
     let mut h = Sha512::new();
@@ -89,7 +81,15 @@ fn challenge(r: &[u8; 32], a: &[u8; 32], msg: &[u8]) -> Scalar {
 
 /// Sign inti. sk = clamped secret (32B). Mengembalikan signature 64 byte
 /// (R || S), dengan sign bit dari pubkey di byte ke-63 (persis curve25519-js).
-fn sign_internal(sk_raw: &[u8; 32], msg: &[u8], rnd: Option<&[u8; 64]>) -> [u8; 64] {
+///
+/// Bisa gagal kalau CSPRNG tidak tersedia — nonce tidak boleh pernah turun ke
+/// nilai tetap, termasuk nol. Catatan: `Result` di file ini adalah alias dari
+/// napi, jadi tipe error-nya ditulis eksplisit sebagai `std::result::Result`.
+fn sign_internal(
+    sk_raw: &[u8; 32],
+    msg: &[u8],
+    rnd: Option<&[u8; 64]>,
+) -> std::result::Result<[u8; 64], String> {
     // Zeroizing: wipe clamped secret saat drop (stack/error path sekalipun).
     let sk = Zeroizing::new(clamp_scalar(sk_raw));
     // scalar a untuk pubkey & S. JS pakai byte mentah (mod L), sama saja.
@@ -98,10 +98,19 @@ fn sign_internal(sk_raw: &[u8; 32], msg: &[u8], rnd: Option<&[u8; 64]>) -> [u8; 
     let a_bytes = base_mult_scalar(&a);
     let sign_bit = a_bytes[31] & 128;
 
-    // r (nonce) — beda jalur: direct vs rnd (hash separation).
+    // The nonce must come from a CSPRNG. Deriving it as SHA512(sk||m) made
+    // sign() deterministic, so two signatures over chosen messages recovered
+    // the identity key (hidden-number-problem lattice attack). rnd stays
+    // injectable so the libsignal-parity oracle and known-answer vectors can
+    // still pin a fixed nonce — this matches oktz-signal/native/signal/src/curve.rs.
+    let mut generated = [0u8; 64];
+    if rnd.is_none() {
+        getrandom::getrandom(&mut generated)
+            .map_err(|_| "no CSPRNG available for the XEdDSA nonce".to_string())?;
+    }
     let r = match rnd {
         Some(rnd) => nonce_rnd(&sk, msg, rnd),
-        None => nonce_direct(&sk, msg),
+        None => nonce_rnd(&sk, msg, &generated),
     };
 
     // R = r*B, packed
@@ -119,7 +128,7 @@ fn sign_internal(sk_raw: &[u8; 32], msg: &[u8], rnd: Option<&[u8; 64]>) -> [u8; 
     sig[32..64].copy_from_slice(&s_bytes);
     // salurkan sign bit pubkey ke byte terakhir signature
     sig[63] |= sign_bit;
-    sig
+    Ok(sig)
 }
 
 /// convertPublicKey di JS: montgomery u → edwards y = (u-1)/(u+1),
@@ -144,7 +153,7 @@ pub fn sign(secret_key: Uint8Array, msg: Uint8Array, opt_random: Option<Uint8Arr
         rnd = Some(r[..64].try_into().unwrap());
     }
     let sk = Zeroizing::new(<[u8; 32]>::try_from(&secret_key[..32]).unwrap());
-    let sig = sign_internal(&sk, &msg, rnd.as_ref());
+    let sig = sign_internal(&sk, &msg, rnd.as_ref()).map_err(napi::Error::from_reason)?;
     Ok(Buffer::from(sig.to_vec()))
 }
 

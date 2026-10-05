@@ -167,13 +167,16 @@ const curve = require('../index.cjs');
 
 const kp = curve.generateKeyPair(new Uint8Array(32));
 const message = Buffer.from('concatenated');
-const signed = curve.signMessage(kp.private, message);
+// sign() draws a fresh CSPRNG nonce on every call, so pin one to compare
+// two signatures byte for byte. This is the same path libsignal uses.
+const rnd = new Uint8Array(64).fill(9);
+const signed = curve.signMessage(kp.private, message, rnd);
 
 console.log('signed length:', signed.length, '= 64 +', message.length);
 assert.equal(signed.length, 64 + message.length);
 assert.deepEqual(
 	Buffer.from(signed.subarray(0, 64)),
-	Buffer.from(curve.sign(kp.private, message)),
+	Buffer.from(curve.sign(kp.private, message, rnd)),
 	'the first 64 bytes are exactly sign() output'
 );
 assert.equal(Buffer.from(curve.openMessage(kp.public, signed)).toString(), 'concatenated');

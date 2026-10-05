@@ -334,11 +334,12 @@ still throws — it just does not influence the result. See
 
 ---
 
-## 6. Signatures are deterministic by default
+## 6. The nonce is random unless you pin it
 
-`sign(secretKey, msg)` with no third argument uses `r = SHA512(sk ‖ m) mod L`
-(`src/lib.rs:54-60`). There is no randomness anywhere in that path, so the
-same message under the same key always produces byte-identical output.
+`sign(secretKey, msg)` with no third argument draws a 64-byte nonce from the
+platform CSPRNG (`getrandom`, `src/lib.rs:108-116`). Two calls with the same key
+over the same message therefore produce **different** signatures. Passing a
+third argument pins the nonce, and then the output is byte-identical every time.
 
 ```js run
 import assert from 'node:assert/strict';
@@ -347,7 +348,7 @@ const require = createRequire(import.meta.url);
 const curve = require('../index.cjs');
 
 const kp = curve.generateKeyPair(new Uint8Array(32).fill(7));
-const message = Buffer.from('deterministic');
+const message = Buffer.from('randomized');
 const nonce = new Uint8Array(64).fill(3);
 
 const a = curve.sign(kp.private, message);
@@ -355,25 +356,35 @@ const b = curve.sign(kp.private, message);
 const withNonce = curve.sign(kp.private, message, nonce);
 const withNonceAgain = curve.sign(kp.private, message, nonce);
 
-assert.deepEqual(Buffer.from(a), Buffer.from(b), 'no nonce -> identical output');
+assert.notDeepEqual(Buffer.from(a), Buffer.from(b), 'no nonce -> CSPRNG nonce -> different output');
 assert.deepEqual(Buffer.from(withNonce), Buffer.from(withNonceAgain), 'a fixed nonce -> identical output');
 assert.notDeepEqual(Buffer.from(a), Buffer.from(withNonce), 'a nonce changes the output');
+assert.equal(curve.verify(kp.public, message, a), true);
 assert.equal(curve.verify(kp.public, message, withNonce), true);
 
-console.log('sign(k, m) twice            -> identical');
+console.log('sign(k, m) twice            -> different (CSPRNG nonce)');
 console.log('sign(k, m, rnd) twice       -> identical for a fixed rnd');
 console.log('sign(k, m) vs sign(k, m, rnd) -> different, and both verify');
 ```
 
 The nonce path hashes it with a distinct prefix so the two derivations cannot
 collide: `r = SHA512(0xfe ‖ 0xff×31 ‖ sk ‖ m ‖ rnd) mod L`
-(`src/lib.rs:63-72`).
+(`src/lib.rs:55-64`). That is the derivation XEdDSA specifies and what
+`libsignal` gets from `curve25519-js` by way of `crypto_sign_direct_rnd`, so
+pinning the nonce is what keeps this package byte-compatible with it.
 
-This is what XEdDSA specifies, and what `libsignal` gets from
-`curve25519-js` by way of `crypto_sign_direct`. It is also the reason two
-signatures over the same message are **not** interchangeable evidence of two
-distinct events — see [../CHANGELOG.md](../CHANGELOG.md) and the security note
-in the README.
+Earlier versions of this package defaulted to `r = SHA512(sk ‖ m) mod L`, a
+function of the secret key alone, and were deterministic. That is a key-recovery
+setup rather than a curiosity: with `sk` fixed, `S = r + h·a` is affine in the
+nonce, so two signatures over chosen messages supply enough equations to recover
+`a` — the hidden-number-problem lattice attack `oktz-signal` documents at
+`native/signal/src/curve.rs:123-126`. **A nonce must never be a function of the
+secret key.** If the CSPRNG cannot be read, `sign` throws rather than fall back
+to a predictable nonce.
+
+Randomized output is also why two signatures over the same message are **not**
+interchangeable evidence of two distinct events — see
+[../CHANGELOG.md](../CHANGELOG.md) and the security note in the README.
 
 ---
 
