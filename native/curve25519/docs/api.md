@@ -38,19 +38,19 @@ named exports. They are the same two functions `index.cjs:67-80` wraps.
 
 ### `sign(secretKey, msg[, opt_random]) → Uint8Array` (64 bytes)
 
-XEdDSA signature. `index.cjs:67-73`, `src/lib.rs:139-149`.
+XEdDSA signature. `index.cjs:67-73`, `src/lib.rs:148-159`.
 
 | Parameter | Type | Length | Notes |
 |---|---|---|---|
 | `secretKey` | `Uint8Array` | 32 | the raw X25519 private scalar |
 | `msg` | `Uint8Array` | any | passed to `node:crypto`/`napi` as bytes; empty is fine |
-| `opt_random` | `Uint8Array` \| `undefined` \| `null` | 64 | nonce. Omit for the deterministic XEdDSA form |
+| `opt_random` | `Uint8Array` \| `undefined` \| `null` | 64 | nonce. **Omit it and the nonce is drawn from the platform CSPRNG**, so every call returns a different signature. Pass a fixed 64-byte value to pin the output byte for byte — that is the `curve25519-js@0.0.4` / `libsignal` / WhatsApp path, and the only one that reproduces a signature another implementation already produced. `sign` throws if the CSPRNG cannot be read; it never falls back to a predictable nonce |
 
 Returns a `Uint8Array` of 64 bytes, `R ‖ S`. Throws `Error: wrong secret key
 length`, `Error: wrong random data length`, or
 `TypeError: unexpected type, use Uint8Array`.
 
-**The secret key is clamped inside the addon** (`src/lib.rs:45-51`, RFC 7748:
+**The secret key is clamped inside the addon** (`src/lib.rs:46-53`, RFC 7748:
 `sk[0] &= 248; sk[31] &= 127; sk[31] |= 64`). You do not clamp it yourself,
 and you cannot observe the clamped value. Note the consequence: two different
 32-byte secrets that differ only in the clamped bits produce the **same**
@@ -58,7 +58,15 @@ signature. If your secret came from somewhere that already clamped, that is
 fine; if you are generating secrets, generate 32 uniform random bytes and let
 the addon clamp.
 
-The returned `Uint8Array` is a fresh copy (`src/lib.rs:148` builds a new
+**Omitting `opt_random` does not make the signature reproducible**, so a
+signature you produced earlier cannot be regenerated and compared. Two
+consequences worth stating: two signatures over the same message are not
+interchangeable evidence of two distinct events, and if you need to test against
+a signature another system produced, you must have its nonce — see
+[encoding.md §6](encoding.md#6-the-nonce-is-random-unless-you-pin-it) for why
+the default is a CSPRNG rather than a function of the key.
+
+The returned `Uint8Array` is a fresh copy (`src/lib.rs:158` builds a new
 `Vec`), not a view over the addon's memory. `Buffer.from(sig)` is safe if you
 want a `Buffer` for another API.
 

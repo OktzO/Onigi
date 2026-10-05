@@ -210,29 +210,36 @@ try {
 if (signalNative) {
 	const kp = curve.generateKeyPair(new Uint8Array(32).fill(8));
 	const message = Buffer.from('cross implementation');
+	// A fixed 64-byte nonce on BOTH sides is what makes the two comparable:
+	// with no nonce each draws its own from the CSPRNG, so the signatures
+	// differ for a reason that has nothing to do with the implementations.
+	const rnd = new Uint8Array(64).fill(21);
 
-	const ours = curve.sign(kp.private, message);
-	const theirs = Buffer.from(signalNative.curveSign(kp.private, message, null));
+	const ours = curve.sign(kp.private, message, rnd);
+	const theirs = Buffer.from(signalNative.curveSign(kp.private, message, rnd));
 
 	console.log('ours  :', Buffer.from(ours).toString('hex'));
 	console.log('theirs:', theirs.toString('hex'));
-	assert.notDeepEqual(Buffer.from(ours), theirs,
-		'a plain sign() here derives the nonce from the key and message; curveSign() takes one from the CSPRNG');
+	assert.deepEqual(Buffer.from(ours), theirs,
+		'the same (key, message, nonce) must sign byte-identically in both implementations');
 
 	assert.equal(signalNative.curveVerify(kp.public, message, ours), true,
 		'oktz-signal accepts our signature');
 	assert.equal(curve.verify(kp.public, message, theirs), true,
 		'we accept oktz-signal\'s signature');
-	console.log('oktz-signal verified our signature, and we verified theirs');
+	console.log('oktz-signal produced our signature byte for byte, and both verified');
 }
 ```
 
-> The signatures differ, and the reason is in the security note of
-> [the README](../README.md#security-note): `sign()` with no third argument
-> derives the nonce deterministically from the key and message
-> (`src/lib.rs:54-60`), while `oktz-signal`'s `curveSign` with a `null` nonce
-> draws one from the CSPRNG (`native/signal/src/curve.rs:123-140`). Pass your
-> own 64-byte nonce to `sign()` to get the same property.
+> The signatures are **identical**, because both implementations were given the
+> same nonce. That is the property that makes a fallback between them safe, and
+> it is the only one worth checking: with no third argument, `sign()` draws a
+> nonce from the platform CSPRNG (`src/lib.rs:108-116`) and so does
+> `oktz-signal`'s `curveSign` (`native/signal/src/curve.rs:123-140`), so two
+> no-nonce signatures differ even though both are valid. Neither derives the
+> nonce from the key — see the security note in [the
+> README](../README.md#security-note) for why that used to be a key-recovery
+> problem and no longer is.
 
 ---
 
