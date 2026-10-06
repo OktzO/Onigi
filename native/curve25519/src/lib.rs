@@ -259,7 +259,7 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 //
 // SUDAH DI-GUARD dari sumber sampai akhir, nol salinan by-value: `sk` :164 (dibuat dari
 // `&secret_key[..32]`, lalu di-clamp IN PLACE di :99), `generated` :113, `rnd` :159,
-// `digest` :66 dan :83.
+// `digest` :66.
 // PASS BY-REFERENCE, tidak menyalin sama sekali: `check_len`, `base_mult_scalar(&Scalar)`,
 // `challenge(&r_bytes, &a_bytes, msg)`, `nonce_rnd` di kedua arm (semuanya `&[u8]`),
 // `getrandom(&mut generated[..])`, `s.to_bytes()` (lewat `&self`), `copy_from_slice`
