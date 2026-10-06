@@ -31,7 +31,7 @@ const sk = Buffer.alloc(32, 0x11);
  * message is the case where a length off-by-one in the SHA512 preimage would
  * otherwise hide).
  *
- * Changing the nonce domain separation (`src/lib.rs:57-58`, the 0xfe ‖ 0xff×31
+  * Changing the nonce domain separation (`src/lib.rs:61-62`, the 0xfe ‖ 0xff×31
  * prefix), the challenge hash (`challenge`), or `clamp_scalar` will break every
  * one of these and silently break curve25519-js@0.0.4 / libsignal / WhatsApp
  * compatibility. Determinism tests cannot catch any of that.

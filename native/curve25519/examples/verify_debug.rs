@@ -55,7 +55,7 @@ fn verify_ed25519(pk: &[u8; 32], msg: &[u8], sig: &[u8; 64]) -> Result<(), Strin
     let a_bytes = a_pt.compress().to_bytes();
     let vk = VerifyingKey::from_bytes(&a_bytes).map_err(|e| format!("vk err: {}", e))?;
 
-    // verify_strict, not the cofactorless verify: same choice src/lib.rs:201 makes,
+    // verify_strict, not the cofactorless verify: same choice src/lib.rs:206 makes,
     // for the same reason (a small-order A would pass the cofactorless equation).
     vk.verify_strict(msg, &signature).map_err(|e| format!("verify err: {}", e))
 }

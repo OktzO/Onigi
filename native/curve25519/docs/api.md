@@ -225,7 +225,8 @@ code that was never written:
   `createPrivateKey` + `createPublicKey`, then strip the DER prefix
   (`index.cjs:20`), then prefix `0x05` if the caller wants libsignal's form.
 - **`scalarMultiply`** — exported by `oktz-signal` as `curveScalarMultiply`
-  (`native/signal/src/lib.rs:40-45`). Not here. `sharedKey` covers the same
+  (`native/signal/src/lib.rs:40-45`, in that crate's checkout, which this
+  repository does not vendor). Not here. `sharedKey` covers the same
   ground through `node:crypto`.
 - **A seeded / deterministic keygen** — see above.
 - **A 33-byte public key accepted anywhere** — see

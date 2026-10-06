@@ -4,9 +4,9 @@ All notable changes to `oktz-curve25519`. This directory is vendored into the
 `Onigi` repository and has its own CI (`.github/workflows/ci.yml` and
 `release.yml`) and its own `napi.config.json`; the commits below are the real
 ones from `git log -- native/curve25519`, and the file lists are the real
-ones in this tree. The five hashless bullets in the `next` section below are
+ones in this tree. The six hashless bullets in the `next` section below are
 the ones in the commits that write this file: a commit cannot contain its own
-hash, so those five are identified by subject rather than by identifier.
+hash, so those six are identified by subject rather than by identifier.
 
 The Rust crate's own version is `0.1.0` (`Cargo.toml`); the npm package's is
 `0.0.4`. They are independent.
@@ -147,19 +147,23 @@ below are commit hashes, not version numbers.
   it at `src/lib.rs:164`. The 32-byte secret now enters this crate into a guard
   once, and the **unclamped** copy is never materialised anywhere else. That is
   a fix in code, not a fifth disclosure — the previous entry's *"Yang benar-benar
-  secret dan TIDAK bisa dihindari dari sini: DUA"* stays two, and `clamp_scalar`
+  secret dan TIDAK bisa dihindari dari sini: DUA"* stays two (at this round; see
+  the entry below for the count it became), and `clamp_scalar`
   is no longer one of them. An earlier draft of this sentence went further and
   said the secret "is never copied again", which was false: the by-value argument
   slot at `src/lib.rs:103` is exactly such a copy, as this same bullet records
-  above. The   corrected phrasing is the checkable one — a claim about
+  above. The corrected phrasing is the checkable one — a claim about
   `clamp_scalar` and about which bytes exist, not about a copy count. The
   criterion in `src/lib.rs` was rewritten to be two mandatory
   questions rather than one. The first is unchanged: is the buffer
   secret-equivalent, i.e. would whoever holds it be able to recover `a` from the
   public `S`? The second is new, and it is the one that was missing: **every
   by-value argument and every by-value return on the signing path is a copy of
-  secret material into memory this crate does not wipe, whatever its type**, so
-  it counts the same as a buffer. That is not a derivation question, which is
+  material into memory this crate does not wipe, whatever its type**, so it
+  counts the same as a buffer. (Worded as *material*, not *secret*: public by-value
+  returns such as `base_mult_scalar`'s `A` and `s.to_bytes()`'s `S` are copies
+  too, and the secret-equivalence question is a separate gate that keeps them out
+  of the residue list.) That is not a derivation question, which is
   exactly why the first test could not see `clamp_scalar`: it would have passed
   it silently. Three shapes are now called out by name, because each has to be
   looked for separately — (a) a `let` that initialises an unguarded local from
@@ -185,8 +189,9 @@ below are commit hashes, not version numbers.
   which had to be cleared rather than assumed: the temporaries inside
   `base_mult_scalar` (`p`, `CompressedEdwardsY`) are `a·B` and `A`, both public;
   napi 3.12.2 borrows the caller's `Uint8Array` through
-  `napi_get_typedarray_info`, so this crate never copies the caller's bytes at
-  all; `verify` holds no secret buffer, because everything it takes is already
+  `napi_get_typedarray_info`, so this crate does not own that memory — though it
+  does copy out of those views into guards at `src/lib.rs:162` and `:164`, which
+  the sweep counted rather than assumed away; `verify` holds no secret buffer, because everything it takes is already
   public; and the clamping is applied, not skipped — 24 key pairs differing only
   in the clamped bits produce identical signatures, and the three golden vectors
   in `tests/nonce-randomness.test.cjs` (whose keys clamp three different ways)
@@ -217,7 +222,7 @@ below are commit hashes, not version numbers.
   `Zeroizing<GenericArray<u8, U64>>` is still unavailable, which is why the fix
   borrows the guard's own `&mut [u8]` instead.
   Three claims that went with the disclosure are corrected rather than kept:
-  - The criterion's escape clause (`src/lib.rs:332`) used to read *"...atau
+  - The criterion's escape clause (`src/lib.rs:247`) used to read *"...atau
     salinannya memang tidak bisa dihindari lalu dicatat"*, which is
     unfalsifiable — it can be satisfied by asserting a fact. It now requires the
     impossibility to be **demonstrated by naming the absent alternative**, and
@@ -227,7 +232,7 @@ below are commit hashes, not version numbers.
     It is not: `src/lib.rs:132` has two by-value returns, the product and then
     the sum via `Add<&Scalar> for &Scalar`. Both are public-derived, so neither
     is a residue, but the count was wrong.
-  - The residue entry at `src/lib.rs:367` told a reader that an unwiped
+  - The residue entry at `src/lib.rs:281-286` told a reader that an unwiped
     `[u8; 32]` exists, with no indication of the standard being asserted. It now
     says so in the shipped text: the claim is **source-level, deliberately, and
     makes no assertion about codegen** — whether a given build's optimiser
@@ -237,20 +242,30 @@ below are commit hashes, not version numbers.
   The README headline changed with it. "Secret keys are zeroized, in every
   representation the signing path materialises" was contradicted by the same
   bullet: the by-value argument slot at `src/lib.rs:103` is a representation the
-  signing path materialises and does not zeroize. It now reads "Every buffer
-  this crate itself materialises and keeps is wrapped in `Zeroizing`", which is
-  a claim about ownership and location rather than about a count of
-  representations, and stays true whatever the count comes out as.
-  The count of genuinely-secret-and-not-avoidable-from-here is **two**, but it is
-  two for a different reason than last time and the second item is smaller. The
-  `:103` by-value argument slot is unchanged: ours to place, dalek's to accept,
+  signing path materialises and does not zeroize. It then read "Every buffer this
+  crate itself materialises and keeps is wrapped in `Zeroizing`", justified here
+  as a claim about ownership rather than about a count — which was wrong twice
+  over: dropping "secret" *widened* the quantifier rather than narrowing it, and
+  the justification claimed the sentence "stays true whatever the count comes out
+  as" when it does not. It is now "Every *secret-equivalent* buffer this crate
+  materialises and keeps is wrapped in `Zeroizing`", and that holds: the buffers
+  it leaves out are public (`a_bytes`, `r_bytes`, `s_bytes`, `sig`) and are listed
+  with reasons at `src/lib.rs:267`. The correction is spelled out in the entry
+  below.
+  The count of genuinely-secret-and-not-avoidable-from-here was **two** at this
+  round — two for a different reason than last time, and the second item smaller.
+  (Superseded by the entry below: it is now two *items* covering four allocation
+  sites, because dalek's `UnpackedScalar` was missing from the enumeration.)
+  The `:103` by-value argument slot is unchanged: ours to place, dalek's to accept,
   and dalek offers no `&[u8; 32]` constructor to place it in instead. The second
   item was previously "sha2's block buffer plus its finalisation buffers", and
   that second half was wrong in two ways at once — it was half ours, and it
-  mixed two different allocations. It is now only what is actually sha2's: the
-  block buffer that still holds `sk`, and `full_res` in
-  `CtVariableCoreWrapper::finalize_fixed_core`, which is on the path this fix now
-  takes — `CoreWrapper::finalize_into_reset` (wrapper.rs:185) calls
+  mixed two different allocations. It is now only the two allocations that are not
+  ours at all: sha2 0.10.9's block buffer that still holds `sk`, and `full_res` in
+  `CtVariableCoreWrapper::finalize_fixed_core` (which is `digest` 0.10.7's generic
+  code, `src/core_api/ct_variable.rs:119`, monomorphised for sha2's core), which is
+  on the path this fix now
+  takes — `CoreWrapper::finalize_into_reset` (wrapper.rs:183-189) calls
   `finalize_fixed_core` and then only adds `core.reset()`/`buffer.reset()`. So
   the fix does not remove `full_res`; it removes the part that was removable.
   No behaviour change: the full byte-identity grid was re-run against this
@@ -260,6 +275,89 @@ below are commit hashes, not version numbers.
   cross-implementation verify checks, 24 clamp-invariance pairs, both
   low-order-forgery probes still rejected, and identical error messages.
   `npm test` is 12 and `docs:verify` is 20 blocks + 4 examples with 0 failures.
+- **The zeroization note is collapsed instead of extended, and three false
+  superlatives and one over-broad headline go with it.** Every round so far found
+  one more false superlative in prose. That is the failure mode, so this round
+  removes prose rather than adding it: the note at `src/lib.rs:209` goes from 196
+  lines to 135, and the duplication is gone rather than trimmed. Specifically,
+  the introduction no longer restates the criterion the next section states, and
+  the old "Batasnya, jujur" section — which re-derived the sha2 residues that the
+  numbered enumeration then re-derived again — is deleted, its unique content
+  folded into that single enumeration. No earned distinction was dropped: the
+  source-level standard, the escape clause and the `GenericArray` post-mortem
+  that earned it, the three shapes of by-value copy, the `E0369` reason there is
+  no hidden by-value spelling, and the two unwiped `Scalar` temporaries at
+  `src/lib.rs:132` all survive, each now stated exactly once.
+  - **The README headline was a broader false claim than the one it replaced.**
+    "Every buffer this crate itself materialises and keeps is wrapped in
+    `Zeroizing`" dropped "secret", which *widened* the quantifier, and it is
+    contradicted by `sig` (`:135`), `a_bytes` (`:105`), `r_bytes` (`:124`) and
+    `s_bytes` (`:133`), and by this crate's own note ("PUBLIK, jadi sengaja tidak
+    dibungkus"). It now reads "Every *secret-equivalent* buffer this crate
+    materialises and keeps is wrapped in `Zeroizing`", and the previous entry's
+    justification for it — that it "stays true whatever the count comes out as" —
+    was false and is retracted above.
+  - **`UnpackedScalar` is now counted.** dalek's `Scalar::unpack()`
+    (`scalar.rs:1119`) holds the limbs of `a` and of `r`, has no wipe, and
+    dalek 4.1.3 has no `impl Drop` anywhere; it was named in prose but excluded
+    from the count, which made "two" read as exhaustive when it was not. It is
+    the same shape as the `:103` argument slot — our expression causes it, a
+    callee API forces it, there is no alternative spelling — so it sits in the
+    same numbered item rather than as a third. The enumeration is now stated as
+    **two items covering four allocation sites**, and the two earlier entries
+    that say "two" carry a forward pointer rather than being rewritten.
+  - **`src/lib.rs:238-239`'s worked example no longer rests on a signature nobody
+    read.** It claimed dalek's "two constructors (scalar.rs:237 and :250) are
+    both positional"; `:250` is `from_bytes_mod_order_wide(input: &[u8; 64])`, a
+    *reference*, and 64 bytes — the `grep` had matched it as a prefix of
+    `from_bytes_mod_order` — and the enumeration also missed the third by-value
+    constructor, `from_canonical_bytes([u8; 32])` at `:261`. The load-bearing
+    claim (no `&[u8; 32]`-taking constructor exists) is true and item 1 survives,
+    but the false sentence was the whole evidence for it, in the direction that
+    makes the argument look stronger than it is. It now names all three
+    signatures and the one that is absent.
+  - **"Every by-value argument and return is a copy of secret bytes" → copy of
+    *material*.** False: `base_mult_scalar` returns public `A` by value,
+    `s.to_bytes()` returns public `S` by value, and `MontgomeryPoint(*pk)` builds
+    by value. It also contradicted this file's own "PASS BY-REFERENCE" list, which
+    files `s.to_bytes()` there. Secret-equivalence is stated as the second gate
+    that keeps those out of the residue list.
+  - **"This crate never copies the caller's bytes at all" → it does, twice.**
+    `src/lib.rs:162` and `:164` copy out of the borrowed `&[u8]` views napi
+    hands over, which this note's own enumeration already admitted two lines
+    below the denial. napi borrows; this crate does not own that memory; it does
+    copy out of it, into guards, and those two copies are counted.
+  - **Two stale citations, comment-only.** `examples/verify_debug.rs:58` said
+    `src/lib.rs:201` (the start of the comment explaining the choice) where the
+    choice is made, `src/lib.rs:206`. `tests/nonce-randomness.test.cjs:34` said
+    `src/lib.rs:57-58` where the nonce domain separation is `src/lib.rs:61-62`;
+    that file is the oracle carrying the three `curve25519-js@0.0.4` /
+    `oktz-signal` vectors, and its comment is the maintenance instruction naming
+    the lines that define the nonce domain separation, so a stale pointer there
+    misdirects whoever edits the one thing that breaks libsignal compatibility.
+    One comment line each; no executable line in either file changed.
+  - **Citation renumbering, and one fix to the checker that was measuring the
+    wrong thing.** The note moved, so every pointer into it moved:
+    `src/lib.rs:257` → `:322`, `:367` → `:281-286`, `:332` → `:247`, and `:209`
+    still resolves to the note's first line. Re-checked over all eight citing
+    files: 105 citation occurrences, of which 94 name this crate's `src/lib.rs`
+    and all 94 are in range with 0 out of range; the other 11 name another
+    crate's file and are now resolved against the real file on disk rather than
+    range-checked against ours, which is what the old checker did — that flaw is
+    why `zeroize-1.9.0/src/lib.rs:696` had been reported as an out-of-range hit
+    on this crate. 9 of the 11 resolve and are correct; the other 2 are the same
+    citation seen twice, `docs/api.md`'s `native/signal/src/lib.rs:40-45` plus
+    this entry's reference to it, which points into `oktz-signal`'s crate, is not
+    vendored here, and now says so in place.
+  - **No behaviour change, and the binary proves it.** The rebuilt
+    `libcurve25519_rs.so` is byte-identical to the `.node` this tree shipped
+    before this round — sha256
+    `ac73a9a17fbf0ee6649c1f134e44c5f499a5a5f220a8a49f7e05c7bd48836f79` — so
+    the comment and prose edits changed no code path at all. The 936-signature
+    explicit-`rnd` grid is byte-identical both to the pre-change baseline and to
+    the grid recorded for `aa029fb`, 0 differing bytes, and all three golden
+    vectors reproduce. `npm test` is 12 and `docs:verify` is 20 blocks +
+    4 examples with 0 failures.
 
 ---
 

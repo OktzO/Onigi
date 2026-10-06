@@ -291,11 +291,14 @@ to the key it claims to. It is **not**:
 
 Verified by reading `src/lib.rs` and by running it:
 
-- **Every buffer this crate itself materialises and keeps is wrapped in
-  `Zeroizing`.** The 32-byte secret enters this crate into a
+- **Every *secret-equivalent* buffer this crate materialises and keeps is wrapped
+  in `Zeroizing`.** That is the widest true claim, not the widest possible one:
+  several buffers this crate keeps are public (`a_bytes`, `r_bytes`, `s_bytes`,
+  `sig`) and are deliberately unwrapped, listed with reasons at `src/lib.rs:267`.
+  The 32-byte secret enters this crate into a
   `zeroize::Zeroizing` buffer at `src/lib.rs:164`, and is clamped **in place** at
   `src/lib.rs:99` — `clamp_scalar` takes `&mut Zeroizing<[u8; 32]>`, so the
-  **unclamped** copy is never materialised anywhere else. Each `Scalar` is
+  **unclamped** bytes never exist inside this crate anywhere but that one buffer. Each `Scalar` is
   wrapped too — `a`, `r`, `h` and `s` in `sign_internal` (`src/lib.rs:103`,
   `src/lib.rs:118`, `src/lib.rs:127`, `src/lib.rs:132`) — together with three
   buffers that are secret-equivalent to `a`: the `SHA512` digest in `nonce_rnd`
@@ -313,7 +316,8 @@ Verified by reading `src/lib.rs` and by running it:
   `GenericArray::from_mut_slice(&mut digest[..])` at `src/lib.rs:67` — rather
   than through `h.finalize().into()`, which returned a `GenericArray` by value
   and so put the secret digest in an unwiped slot in *this* crate's frame first.
-  Two honest limits, both recorded at `src/lib.rs:257`: `&*r + &*h * &*a`
+  Two honest limits, recorded at `src/lib.rs:322` and `src/lib.rs:278`:
+  `&*r + &*h * &*a`
   materialises two unwiped `Scalar` temporaries, the product and then the sum,
   because each is the return value of a `Mul`/`Add` impl — harmless here, since
   `h` is public and `a` is not recoverable from `h·a` or `r + h·a` without
@@ -334,27 +338,40 @@ Verified by reading `src/lib.rs` and by running it:
   recover `a` from the public `S`? "Not derived from the secret" does not
   clear it, which is why the digest and both nonces are wrapped — **and does
   anything copy it by value**, since every by-value argument and every by-value
-  return on the signing path is a copy of secret material into memory this crate
-  does not wipe, whatever its type. The second question is the one that a
-  derivation test cannot see at all: `clamp_scalar` used to initialise an
-  unwiped local from the guarded key and return it by value, which put an
+  return on the signing path is a copy of *material* into memory this crate does
+  not wipe, whatever its type. Secret-equivalence is the other gate, not a
+  substitute: that is what keeps public by-value returns such as
+  `base_mult_scalar`'s `A` and `s.to_bytes()`'s `S` out of the residue list.
+  The by-value question is the one that a derivation test cannot see at all:
+  `clamp_scalar` used to initialise an unwiped local from the guarded key and
+  return it by value, which put an
   *unclamped* copy of the secret on the stack twice, and no amount of
   derivation reasoning would have flagged it.
   The caller's `Uint8Array` inputs are the caller's to zeroize, not ours, and
   they are not zeroized here — napi hands them over as borrowed `&[u8]` views
-  onto JS memory (`napi_get_typedarray_info`), so nothing in this crate copies
-  them either. What is left outside any guard is on our side of the boundary,
-  and it is not the caller's bytes. Two things, and it is worth being precise
-  about whose they are, because only one of them is sha2's:
+  onto JS memory (`napi_get_typedarray_info`), and this crate does not own that
+  memory. It does copy out of those views: `src/lib.rs:162` copies the 64
+  caller's nonce bytes into a guard, and `src/lib.rs:164` copies the 32 caller's
+  secret-key bytes into a guard. Those two copies are counted above, under
+  `SUDAH DI-GUARD`; what is left outside any guard is on our side of the
+  boundary, and it is not the caller's bytes. It is worth being precise about
+  whose each piece is, so: one of them is ours to place, and the rest are not
+  ours at all:
   `Scalar::from_bytes_mod_order` takes its 32 bytes **by value**, so the `**sk`
   at `src/lib.rs:103` materialises an unwiped `[u8; 32]` for the duration of that
-  call — ours, in dalek's frame, unavoidable here only because dalek has no
-  `&[u8; 32]`-taking constructor to call instead. The other one really is
-  sha2's: the `Sha512` buffers above hold `sk`, or a preimage of `r`, until they
-  are dropped unwiped. The `GenericArray` that sha2's `finalize_fixed` used to
-  return by value was **not** in that second group — its value landed in this
-  crate's frame, so it was ours to fix, and it is fixed. Both remaining items are
-  recorded at `src/lib.rs:367` as open, not as fixed, and that entry states
+  call — ours to place, dalek's to accept, and unavoidable here only because
+  dalek has no `&[u8; 32]`-taking constructor to call instead. The rest are not
+  ours at all: dalek's `UnpackedScalar` limb temporaries from `Scalar::unpack()`
+  (`scalar.rs:1119`, reached from `from_bytes_mod_order` → `reduce()`, from
+  `from_bytes_mod_order_wide`, and from the `Mul`/`Add` impls), the `Sha512`
+  buffers above, which hold `sk` or a preimage of `r` until they are dropped
+  unwiped, and `full_res` in `CtVariableCoreWrapper::finalize_fixed_core`
+  (`digest-0.10.7/src/core_api/ct_variable.rs:119`), which every finalisation path
+  allocates unwiped. The `GenericArray` that sha2's `finalize_fixed` used to
+  return by value was **not** in that group — its value landed in this
+  crate's frame, so it was ours to fix, and it is fixed. All of these are
+  recorded at `src/lib.rs:278` as open, not as fixed: two numbered items,
+  covering four allocation sites. That entry states
   plainly that the claim is a source-level one and makes no assertion about what
   any particular build's codegen does with it.
 - **No `unsafe` in the Rust.** `#![deny(unsafe_code)]` is the first line of
