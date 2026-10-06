@@ -73,6 +73,11 @@ const base = `http://127.0.0.1:${server.address().port}`;
 const noopLogger = { info() { }, debug() { }, warn() { }, error() { }, trace() { } };
 const settle = (promise) => promise.then((value) => ({ value }), (err) => ({ err }));
 
+// ctx is third-party-owned: a caller may pass { reuploadRequest } with no logger,
+// so a 410 must still recover on that shape. The recovery must not be defeated
+// by the recovery.
+const loggerless = (reuploadRequest) => ({ reuploadRequest });
+
 test('a 410 from getHttpStream triggers a reupload request', async () => {
     const escaped = [];
     const onEscaped = (err) => { escaped.push(err); };
@@ -119,6 +124,19 @@ test('a 410 from getHttpStream triggers a reupload request', async () => {
         assert.equal(stuck.err?.isBoom, true, `a reupload that also 410s must reject with the Boom, got ${stuck.err?.constructor?.name}: ${stuck.err?.message}`);
         assert.equal(stuck.err.output?.statusCode ?? stuck.err.status, 410, 'the caller must still see the 410');
         assert.equal(retried, 1, 'the retry must happen once, not in a loop');
+
+        // ctx with no logger at all: the reachable ctx.logger.info call must not
+        // turn the 410 into a TypeError, which would defeat the recovery.
+        let noLoggerUploads = 0;
+        const bare = await settle(downloadMediaMessage(imageMessage(`${base}/gone`), 'buffer', {},
+            loggerless(async () => { noLoggerUploads++; return imageMessage(`${base}/fresh`); })));
+        assert.equal(noLoggerUploads, 1, 'a ctx without a logger must still reach reuploadRequest');
+        assert.equal(bare.err, undefined, `a ctx without a logger must recover, got ${bare.err?.constructor?.name}: ${bare.err?.message}`);
+        assert.ok(bare.value?.equals(plainBytes), 'the loggerless reupload must decrypt byte-for-byte');
+
+        // A stray unhandledRejection is only delivered on the next macrotask, so
+        // the check has to happen after the event loop has turned.
+        await new Promise((resolve) => setImmediate(resolve));
         assert.deepEqual(escaped.map((e) => `${e?.constructor?.name}: ${e?.message}`), [],
             'a media failure escaped as an uncaught exception or unhandled rejection');
     } finally {
@@ -174,6 +192,17 @@ test('getMediaRetryKey agrees for a string mediaKey and its bytes', () => {
     // answer: a ciphertext sealed under the string opens under the bytes.
     assert.equal(decryptMediaRetryData(sealRetryRequest(persistedKey), mediaKey, msgId).stanzaId, msgId,
         'a request sealed with a base64 mediaKey must be readable with the same mediaKey as bytes');
+
+    // All four assertions above only compare one mediaKey against itself, so a
+    // "fix" that stopped deriving the key from mediaKey at all -- a constant, or
+    // an input truncated so short it collides -- would satisfy every one of them.
+    // This is the only assertion here that pins the key to the mediaKey: a
+    // ciphertext sealed under a *different* mediaKey must not open.
+    const otherKey = sealRetryRequest(randomBytes(32));
+    assert.throws(() => decryptMediaRetryData(otherKey, mediaKey, msgId),
+        'a ciphertext sealed under a different mediaKey must not open -- the retry key must depend on mediaKey');
+    assert.throws(() => decryptMediaRetryData(otherKey, persistedKey, msgId),
+        'a ciphertext sealed under different bytes must not open under their base64 string');
 
     // Ruling out the lazy fix that only stops the throw: hashing the base64 *text*
     // is still the wrong key, so it must not agree with hashing the bytes.
