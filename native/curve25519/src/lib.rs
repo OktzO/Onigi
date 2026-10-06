@@ -268,7 +268,8 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 // `CompressedEdwardsY` di `base_mult_scalar` — `impl Mul<&Scalar> for &EdwardsPoint`
 // (edwards.rs:720) memang menyalin `self`, tapi `self` itu konstanta publik — lalu
 // `a_bytes` :105 (=`A`), `r_bytes` :124 (=`R`), `s_bytes` :133 (=`S`), `sig` :135,
-// `digest` :83, `sign_bit` :106.
+// `digest` :83, `sign_bit` :106. Yang publik di `base_mult_scalar` adalah POIN-nya;
+// SCALAR-nya secret, dan alokasi digit-nya ada di 2(a2).
 // MEMILIK PEMANGGIL: `secret_key`, `opt_random`, `msg` — dipinjam lewat `&` oleh napi
 // 3.12.2 (`napi_get_typedarray_info`, arraybuffer.rs:740, dari `impl_typed_array!`
 // di :1546). Yang dipinjam view milik pemanggil; :162 dan :164 menyalin DARI view itu
@@ -276,32 +277,69 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 // secret sama sekali: inputnya sudah publik.
 //
 // == HASILNYA: YANG BENAR-BENARNYA SECRET DAN TIDAK BISA DI-HINDARI DARI SINI —
-//    DUA BUTIR, EMPAT ALOKASI ==
+//    DUA BUTIR, ENAM ALOKASI ==
 //
 // Standar yang dipakai dinyatakan terbuka di depan butir 1: ini SOURCE-level, dengan
 // sengaja, dan tidak bergantung pada codegen — apakah optimiser menyalin byte ke sana
 // atau meng-optimasi salinan itu pada build tertentu tidak diklaim di sini dan tidak
 // boleh disandarkan pada catatan ini. Yang diklaim hanya bentuknya di sumber.
 //
+// ANGKA INI HASIL KITERIA, BUKAN BUKTI. Enam menyatakan apa yang keluar ketika dua
+// pertanyaan di atas dijalankan pada kode seperti adanya file ini; itu tidak menyatakan
+// bahwa tidak ada yang tersisa. Yang jelas tidak akan terlihat oleh cara hitung ini:
+// alokasi internal dependency yang bukan tiga alokasi dalek yang disebut 2(a), dan apa
+// pun yang hanya terjangkau lewat call graph internal dependency — yaitu yang tidak
+// disebut ekspresi mana pun di file ini. Lima putaran sebelumnya masing-masing menemukan
+// satu yang terlewat, jadi angka ini dibaca sebagai dacah, bukan dipercaya.
+//
 // 1. Slot argumen by-value `**sk` di :103 — ours to place, dalek's to accept. Yang
 //    ABSEN itu satu: constructor `Scalar` yang menerima `&[u8; 32]`.
 //    `from_bytes_mod_order` (scalar.rs:237) dan `from_canonical_bytes` (:261)
-//    keduanya menerima 32 byte BY VALUE; satu-satunya constructor yang menerima
-//    reference adalah `from_bytes_mod_order_wide` (:250), dan yang diterimanya
-//    `&[u8; 64]`. `**sk` — dua kali deref dari `&mut Zeroizing<[u8; 32]>` — memanggil
-//    yang 32-byte, jadi slot argumennya terisi dan tidak ada penataan ulang di file ini
-//    yang memanggilnya lewat `&`. Salinan ini milik frame callee, di luar jangkauan
+//    keduanya menerima 32 byte BY VALUE; `from_bits` (:278) juga, tapi hanya di balik
+//    feature `legacy_compatibility` dan sudah deprecated, jadi bukan alternatif. Yang
+//    menerima reference adalah `from_bytes_mod_order_wide` (:250, `&[u8; 64]`),
+//    `hash_from_bytes` (:625, `&[u8]`), `from_hash` (:671, generic `D`, bukan
+//    reference) dan `random` (:597, `&mut R`) — tidak satu pun menerima `&[u8; 32]`.
+//    Ada satu yang menerimanya, dan sengaja disebut supaya argumen ini tidak dibaca
+//    lebih kuat dari yang bukti dukung: `Scalar52::from_bytes(&[u8; 32])`
+//    (backend/serial/u64/scalar.rs:65), limb yang jadi `UnpackedScalar`. Ia tidak
+//    alternatif karena `pack()` (:1141) private, jadi limb itu tidak pernah menjadi
+//    `Scalar` tanpa lewat constructor by-value yang di atas — jalur yang sedang kita
+//    bilang tidak ada.
+//    `**sk` — dua kali deref dari `&mut Zeroizing<[u8; 32]>` — memanggil yang 32-byte,
+//    jadi slot argumennya terisi dan tidak ada penataan ulang di file ini yang
+//    memanggilnya lewat `&`. Salinan ini milik frame callee, di luar jangkauan
 //    `Zeroizing` crate ini.
 // 2. Yang di dalam DEPENDENCY: ekspresi kita yang memanggilnya, API-nya yang memaksa —
-//    bentuk yang sama dengan butir 1, karena tidak ada alternatif. Ketiganya benar-
-//    benar secret, tidak punya wipe, dan tidak bisa dijangkau dari sini:
-//    (a) dalek, `Scalar::unpack()` (scalar.rs:1119) — `pub(crate)`, jadi tidak bisa
-//        dipanggil dari file ini. Setiap operasi limbanya mengembalikan `UnpackedScalar`
-//        sementara yang tidak di-zeroize; satu-satunya yang di-wipe di dalek adalah
-//        scratch `batch_invert` (:834), jadi zeroize di sana opt-in per call site.
-//        Dipanggil dari `reduce()` (→ `from_bytes_mod_order` :237, jadi `a` dari :103),
-//        dari `from_bytes_mod_order_wide` (:250, jadi `digest` :68/:84 yang
-//        secret-equivalent), dan dari impl `Mul`/`Add` di :132 (jadi `a` dan `r`).
+//    bentuk yang sama dengan butir 1, karena tidak ada alternatif. Yang di sini
+//    benar-benar secret, tidak punya wipe, dan tidak bisa dijangkau dari sini:
+//    (a) dalek, TIGA alokasi, semuanya secret-equivalent dan semuanya tidak di-wipe
+//        di call site yang kita kirim:
+//        (a1) `UnpackedScalar` sementara dari `Scalar::unpack()` (:1119), yang
+//        `pub(crate)` jadi tidak bisa dipanggil dari file ini. Yang memanggilnya di
+//        jalur kita: `reduce()` — jadi `a` dari :103, lewat `from_bytes_mod_order`
+//        :237 — dan `Self::mul`/`Self::add` (`.unpack()` di :326 dan :346), yang
+//        menghitung `a`, `r`, `h`, `s` di :132. Tipe limb itu sendiri BISA di-wipe:
+//        `impl Zeroize` ada untuk `Scalar52`/`Scalar29` yang di-alias jadi
+//        `UnpackedScalar` (:181/:188 → backend/serial/u64/scalar.rs:34). Tapi setiap
+//        wipe di dalek opt-in per call site, dan call site yang ada semuanya di luar
+//        jalur kita: scratch `batch_invert` (:834), `prev_bit` di ladder Montgomery
+//        (montgomery.rs:186), `scalar_digits` di straus
+//        (backend/serial/scalar_mul/straus.rs:141).
+//        (a2) `[i8; 64]` digit radix-16 dari `Scalar::as_radix_16()` (:985), yang
+//        mengembalikan by value dan tidak punya wipe sama sekali. Dipanggil
+//        `variable_base_mul`, jadi `B * a` di :73 — `impl Mul<&Scalar> for
+//        &EdwardsPoint` (edwards.rs:720) mendarat di `backend/mod.rs:227`, yang
+//        memilih serial atau SIMD. BUKAN residue bersyarat pada CPU: kedua cabangnya
+//        memanggil `as_radix_16()` (serial …/variable_base.rs:20, vector …:29), jadi
+//        backend mana pun yang aktif, digit `a` dan `r` ada di `[i8; 64]` tak ber-wipe.
+//        (a3) `UnpackedScalar::from_bytes_wide` (backend/serial/u64/scalar.rs:88 /
+//        u32/:91) mengembalikan limb `digest` BY VALUE ke dalam ekspresi :68/:84, lewat
+//        `from_bytes_mod_order_wide` (:251). Yang di :68 secret-equivalent; yang di :84
+//        kode yang sama atas input publik. Jalur itu TIDAK lewat `unpack()`:
+//        `from_bytes_mod_order_wide` memanggil `from_bytes_wide(...).pack()`, dan
+//        `pack()` (:1141) memanggil `as_bytes()`. Residue-nya nyata, alokasinya
+//        berbeda dari (a1) — jadi `digest` punya dua alokasi di dalek, bukan satu.
 //    (b) sha2, state `Sha512` di `nonce_rnd` (:60-65) menyerap `sk` lewat
 //        `h.update(sk)` :63. `digest_pad` (block-buffer-0.10.4/src/lib.rs:290) hanya
 //        meng-nol byte SETELAH posisi blok dan `BlockBuffer::reset` (:180) hanya

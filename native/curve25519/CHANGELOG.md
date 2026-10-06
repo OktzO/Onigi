@@ -4,9 +4,9 @@ All notable changes to `oktz-curve25519`. This directory is vendored into the
 `Onigi` repository and has its own CI (`.github/workflows/ci.yml` and
 `release.yml`) and its own `napi.config.json`; the commits below are the real
 ones from `git log -- native/curve25519`, and the file lists are the real
-ones in this tree. The six hashless bullets in the `next` section below are
+ones in this tree. The seven hashless bullets in the `next` section below are
 the ones in the commits that write this file: a commit cannot contain its own
-hash, so those six are identified by subject rather than by identifier.
+hash, so those seven are identified by subject rather than by identifier.
 
 The Rust crate's own version is `0.1.0` (`Cargo.toml`); the npm package's is
 `0.0.4`. They are independent.
@@ -302,11 +302,14 @@ below are commit hashes, not version numbers.
     dalek 4.1.3 has no `impl Drop` anywhere; it was named in prose but excluded
     from the count, which made "two" read as exhaustive when it was not. It is
     the same shape as the `:103` argument slot — our expression causes it, a
-    callee API forces it, there is no alternative spelling — so it sits in the
-    same numbered item rather than as a third. The enumeration is now stated as
-    **two items covering four allocation sites**, and the two earlier entries
-    that say "two" carry a forward pointer rather than being rewritten.
-  - **`src/lib.rs:238-239`'s worked example no longer rests on a signature nobody
+    callee API forces it, there is no alternative spelling — so it sits under
+    item 2, "Yang di dalam DEPENDENCY", as sub-entry **2(a)**: item 1 is the one
+    allocation that is ours to place, and this one is in dalek's frame. The
+    enumeration is now stated as
+    **two items covering four allocation sites** at this round — a count that the
+    entry below revises again — and the two earlier entries that say "two" carry
+    a forward pointer rather than being rewritten.
+  - **`src/lib.rs:297-302`'s worked example no longer rests on a signature nobody
     read.** It claimed dalek's "two constructors (scalar.rs:237 and :250) are
     both positional"; `:250` is `from_bytes_mod_order_wide(input: &[u8; 64])`, a
     *reference*, and 64 bytes — the `grep` had matched it as a prefix of
@@ -358,6 +361,98 @@ below are commit hashes, not version numbers.
     the grid recorded for `aa029fb`, 0 differing bytes, and all three golden
     vectors reproduce. `npm test` is 12 and `docs:verify` is 20 blocks +
     4 examples with 0 failures.
+- **The rejection surface is pinned where a reader meets it, the two
+  implementations are pinned against each other, and the residue note stops
+  claiming a count it cannot support.** Three separate things, no library
+  behaviour change.
+  - **The low-order-key forgery is in the measured rejection list, not only in a
+    test.** `examples/02-rejection.mjs` now runs it — an all-zero public key with
+    `R = A, S = 0`, under three messages — and asserts `false` beside the other
+    rejections. The 32 bytes of `R` are derived in the file's comment from
+    `(0 − 1)/(0 + 1) = −1 mod (2²⁵⁵ − 19)` rather than pasted. This is the
+    rejection on that list where "returns `false`" is the security property
+    rather than a convenience, and it is the one the disclosure discussed in
+    prose while the measured list omitted.
+  - **A test proves this crate and `oktz-signal` agree.** The last case in
+    `tests/platform-loader.test.cjs` loads
+    `oktz-signal/native/signal/index.cjs` through `createRequire`, asserts that
+    both implementations reject that same forgery, and then checks each one
+    against the other's signatures — byte-identical output on a pinned 64-byte
+    nonce, and verified in both directions over three keys that clamp three
+    different ways. It skips, printing the reason, if the optional prebuild is
+    absent, so a missing prebuild cannot fail the suite; it was verified both ways
+    round, by making `oktz-signal` resolve to nothing (skip, 0 failures) and by
+    making it resolve to a stand-in with the cofactorless behaviour (fail).
+    Nothing in this repository did that check before, and that is exactly how the
+    `verify_strict` fix went unnoticed: `tests/curve-xeddsa-delegation.test.mjs`
+    blocks `oktz-curve25519` resolution outright, and
+    `lib/Modded/curve-native.js:126-134` prefers `oktz-signal` for verify, so
+    this crate's `verify` was never run against a real `oktz-signal` signature.
+  - **The load-time coupling is documented, and the fallback is still silent.**
+    `README.md` now has a section saying what the security note above could not:
+    `verify` is only as strong as the binding that loaded, and in the enclosing
+    repository that binding is chosen outside this package. Since `verify_strict`
+    landed, both are strict; but nothing warns when exactly one of the two loads,
+    and `lib/Modded/curve-native.js` only warns when neither does. Turning that
+    into a warning is recorded as the follow-up it is — and deliberately not
+    done here, since the decision belongs to the adaptor and no file in this
+    package should change behaviour to make it.
+  - **Three corrections the previous round's review adjudicated but never landed
+    in source.** (a) A fifth residue was named in that round's report and not in
+    the note: `base_mult_scalar` (`:105`, `:124`) computes `B * a`, which reaches
+    `variable_base_mul` and so `Scalar::as_radix_16()` (`scalar.rs:985`), and that
+    returns an unwiped `[i8; 64]` of radix-16 digits of `a` and `r`. It is
+    secret-equivalent, in dalek's frame, and it is not conditional on the CPU:
+    `backend/mod.rs:227` picks the serial or the SIMD backend and **both**
+    branches call `as_radix_16()` (serial `variable_base.rs:20`, vector `:29`).
+    It is now counted, as 2(a2). (b) Two superlatives in the sentences written to
+    fix the previous superlatives are gone. `impl Scalar` has four
+    reference-taking entry points (`from_bytes_mod_order_wide` `:250`,
+    `hash_from_bytes` `:625`, `from_hash` `:671`, `random` `:597`), not one;
+    `from_bits` `:278` is a third 32-byte by-value constructor, behind
+    `legacy_compatibility` and deprecated, and the one `&[u8; 32]`-taking
+    function in the crate — `Scalar52::from_bytes`
+    (backend/serial/u64/scalar.rs:65) — is named in the note rather than left
+    out, because its `pack()` is private and so it is not the alternative the
+    note claims is absent. And dalek's wipe sites are not one: `batch_invert`'s
+    scratch (`scalar.rs:834`), `prev_bit` in the Montgomery ladder
+    (`montgomery.rs:186`) and `scalar_digits` in straus
+    (`backend/serial/scalar_mul/straus.rs:141`), all opt-in per call site, none
+    of them on this crate's path. The load-bearing claim — no
+    `&[u8; 32]`-taking `Scalar` constructor — survives
+    and is now argued from the signatures rather than from a `grep`. (c) The
+    completeness hedge existed in that round's message and here, and in neither
+    `src/lib.rs` nor `README.md`; both carry it now, directly above the count.
+  - **Two smaller corrections, both in claims that were pointing at code that
+    does not do what they said.** `src/lib.rs` and `README.md` said
+    `Scalar::unpack()` was reached from `from_bytes_mod_order_wide`. It is not:
+    that constructor calls `UnpackedScalar::from_bytes_wide(input).pack()`, and
+    `pack()` (`scalar.rs:1141`) calls `as_bytes()`. The residue at `:68`/`:84` is
+    real and is now attributed to the allocation it actually comes from — a
+    `UnpackedScalar` returned by value from `from_bytes_wide` — which is a
+    different allocation from the limb temporaries, and is counted as 2(a3). And
+    the previous entry in this file said `UnpackedScalar` "sits in the same
+    numbered item" as `:103`; it sits in item 2 as 2(a). Its own citation of
+    "`src/lib.rs:238-239`'s worked example" pointed at a line that had become the
+    criterion's list of by-value shapes; the worked example is `:297-302`.
+  - **The count moves from four allocation sites to six, and is now qualified.**
+    One is the `:103` argument slot, three are dalek's (`unpack()`'s
+    `UnpackedScalar`, `as_radix_16()`'s `[i8; 64]`, `from_bytes_wide`'s
+    `UnpackedScalar`), one is sha2's block buffer, one is `full_res`. The number
+    is a result of the criterion applied to the code as it stands, not a proof
+    that nothing else is there; dependency-internal allocations the enumeration
+    does not name, and anything reachable only through a dependency's own call
+    graph, would not appear in any count made this way — and both
+    `src/lib.rs:287-293` and the README say so next to the number instead of
+    leaving it bare.
+  - **No behaviour change, and the binary proves it.** The rebuilt
+    `libcurve25519_rs.so` is byte-identical to the `.node` this tree shipped
+    before this round — sha256
+    `ac73a9a17fbf0ee6649c1f134e44c5f499a5a5f220a8a49f7e05c7bd48836f79` — so
+    the example and note edits changed no code path at all. All three
+    `curve25519-js@0.0.4` vectors reproduce, `npm test` is 13 (the count is 12
+    plus the one interop case), and `docs:verify` is 20 blocks + 4 examples with
+    0 failures.
 
 ---
 

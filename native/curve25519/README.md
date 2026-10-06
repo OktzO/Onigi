@@ -316,14 +316,16 @@ Verified by reading `src/lib.rs` and by running it:
   `GenericArray::from_mut_slice(&mut digest[..])` at `src/lib.rs:67` — rather
   than through `h.finalize().into()`, which returned a `GenericArray` by value
   and so put the secret digest in an unwiped slot in *this* crate's frame first.
-  Two honest limits, recorded at `src/lib.rs:322` and `src/lib.rs:278`:
+  Two honest limits, recorded at `src/lib.rs:360` and `src/lib.rs:279`:
   `&*r + &*h * &*a`
   materialises two unwiped `Scalar` temporaries, the product and then the sum,
   because each is the return value of a `Mul`/`Add` impl — harmless here, since
   `h` is public and `a` is not recoverable from `h·a` or `r + h·a` without
   already holding `a`; and `Zeroizing` bounds this crate's own buffers, not the
   ones inside its dependencies — `curve25519-dalek`'s `UnpackedScalar` limb
-  temporaries, and in sha2 0.10.9 the `Sha512` state that `nonce_rnd` feeds the
+  temporaries and the `[i8; 64]` of radix-16 digits that `variable_base_mul`
+  builds out of `a` and `r` for every `B * a`, and in sha2 0.10.9 the `Sha512`
+  state that `nonce_rnd` feeds the
   secret key into at `src/lib.rs:63` (sha2 has neither `Drop` nor `Zeroize`
   anywhere, and `finalize_fixed_reset` does not help: `digest_pad` only zeroes
   bytes *after* the block position, and `BlockBuffer::reset` only rewinds the
@@ -362,18 +364,31 @@ Verified by reading `src/lib.rs` and by running it:
   call — ours to place, dalek's to accept, and unavoidable here only because
   dalek has no `&[u8; 32]`-taking constructor to call instead. The rest are not
   ours at all: dalek's `UnpackedScalar` limb temporaries from `Scalar::unpack()`
-  (`scalar.rs:1119`, reached from `from_bytes_mod_order` → `reduce()`, from
-  `from_bytes_mod_order_wide`, and from the `Mul`/`Add` impls), the `Sha512`
+  (`scalar.rs:1119`, reached from `from_bytes_mod_order` → `reduce()` and from
+  the `Mul`/`Add` impls) *and*, separately, the `UnpackedScalar` that
+  `from_bytes_mod_order_wide` gets from `UnpackedScalar::from_bytes_wide` — that
+  path does not go through `unpack()` at all, it calls `from_bytes_wide(...).pack()`
+  and `pack()` calls `as_bytes()` — plus the `[i8; 64]` of radix-16 digits from
+  `Scalar::as_radix_16()` (`scalar.rs:985`) that `variable_base_mul` builds for
+  every `B * a`; then the `Sha512`
   buffers above, which hold `sk` or a preimage of `r` until they are dropped
   unwiped, and `full_res` in `CtVariableCoreWrapper::finalize_fixed_core`
   (`digest-0.10.7/src/core_api/ct_variable.rs:119`), which every finalisation path
   allocates unwiped. The `GenericArray` that sha2's `finalize_fixed` used to
   return by value was **not** in that group — its value landed in this
   crate's frame, so it was ours to fix, and it is fixed. All of these are
-  recorded at `src/lib.rs:278` as open, not as fixed: two numbered items,
-  covering four allocation sites. That entry states
+  recorded at `src/lib.rs:279` as open, not as fixed: two numbered items,
+  covering six allocation sites. That entry states
   plainly that the claim is a source-level one and makes no assertion about what
   any particular build's codegen does with it.
+  **"Six" is the result of the criterion applied to the code as it stands, not
+  a proof that six is all of them.** Two things cannot show up in a count made
+  this way: allocations internal to a dependency that are not the ones the
+  enumeration names, and anything reachable only through a dependency's internal
+  call graph — that is, through no expression in this file. Five
+  separate review rounds each turned up one more after the previous round said
+  the list was finished, so the number is a claim to be re-run, not a fact to
+  rely on. `src/lib.rs:287-293` carries the same hedge in the source.
 - **No `unsafe` in the Rust.** `#![deny(unsafe_code)]` is the first line of
   `src/lib.rs`. Verification is delegated to `ed25519-dalek` rather than
   hand-rolled (`src/lib.rs:175-177` says why).
@@ -384,11 +399,43 @@ Verified by reading `src/lib.rs` and by running it:
   Edwards order-2 point, where `R = A, S = 0` satisfies the equation for every
   message and every key.
   `tests/loworder-forgery.test.cjs` asserts that this package returns `false`
-  for exactly that forgery. `oktz-signal` was already strict
+  for exactly that forgery, and `examples/02-rejection.mjs` prints it as part of
+  the measured rejection surface. `oktz-signal` was already strict
   (`native/signal/src/curve.rs:175-178`, in that crate's checkout, which this
   repository does not vendor).
 - **Scalar arithmetic is constant-time**, because it is `curve25519-dalek`'s,
   not hand-written. The non-scalar work is `sha2`.
+
+### The verifier that actually runs is chosen at load time
+
+**`verify()` is only as strong as the binding that got loaded.** Nothing inside
+this package chooses that. In the enclosing `Onigi` repository,
+`lib/Modded/curve-native.js:126-134` delegates XEdDSA verification to
+`oktz-signal`'s native `curveVerify` when that binding loaded, and falls back to
+this package's `verify()` when it did not. So the equation a caller actually gets
+depends on whether an optional prebuild installed.
+
+Both are strict, and that is checked rather than asserted:
+`tests/platform-loader.test.cjs` loads `oktz-signal/native/signal/index.cjs`,
+and asserts that both implementations reject the low-order forgery under three
+messages and that each verifies the other's signatures — byte for byte on a
+pinned nonce. Without that test, a disagreement would be invisible here:
+`tests/curve-xeddsa-delegation.test.mjs` blocks `oktz-curve25519` resolution
+outright, so this crate's `verify` is never reached through that path at all.
+The test skips, with the reason printed, when the optional prebuild is absent —
+a missing prebuild does not fail the suite.
+
+**The fallback is silent.** `lib/Modded/curve-native.js` emits a warning only
+when *neither* binding loaded; when exactly one did, the substitution is
+invisible at runtime. As things stand that is not a security hole, because the
+two agree — but it is the shape the bug had: this package used to be the
+cofactorless one, and the only reason anyone found out is that the two were
+compared by hand. **This should probably become a warning** — an opt-in one,
+since a caller who deliberately installed only this prebuild would otherwise
+start seeing one on every process start. It is deliberately **not** done here:
+this package cannot emit it, `oktz-signal` does not own the decision either, and
+changing the fallback's behaviour belongs to the adaptor, not to a change that
+has no source file to put it in.
 
 ### One thing a caller should know before using it
 
@@ -448,6 +495,13 @@ length or a plain `Array`: a throw. See
 [docs/quickstart.md](docs/quickstart.md#what-rejection-actually-looks-like)
 and `examples/02-rejection.mjs`, both executed by `npm run docs:verify`.
 
+One of those rejections is about the **key** rather than the signature, and it
+is measured in the same example rather than asserted in prose: an all-zero
+public key with `R = A, S = 0` returns `false`, under three different messages.
+The cofactorless equation this package used to verify with returns `true` for
+that forgery for every key and every message, so this is the case where
+"it returns false" is the security property rather than a convenience.
+
 ---
 
 ## What has and has not actually been run
@@ -458,7 +512,7 @@ Being precise, because "it builds" and "it works" are not the same claim.
 |---|---|
 | `x86_64-unknown-linux-gnu` | **built and loaded.** The test suite and the documentation gate both run against it. |
 | the other four targets | **built in CI. Never loaded.** No runner executes them. |
-| cross-implementation agreement with `oktz-signal` | **executed**, in `examples/01-sign-verify.mjs`, when `oktz-signal` resolves. Skipped otherwise, and the skip is printed. |
+| cross-implementation agreement with `oktz-signal` | **executed in the test suite**, by the last case in `tests/platform-loader.test.cjs`: both implementations reject the low-order forgery, and each verifies the other's signatures byte for byte on a pinned nonce. Skipped, with the reason printed, when `oktz-signal`'s prebuild does not resolve. Also demonstrated in `examples/01-sign-verify.mjs`. |
 | `cargo test` | **not run.** There are no `#[test]` functions in `src/lib.rs`; `examples/verify_debug.rs` is a `cargo run` example, not a test. |
 | external security assessment | **none** |
 
@@ -468,7 +522,7 @@ cp target/release/libcurve25519_rs.so \
    native/curve25519/curve25519.linux-x64-gnu.node
 
 # measured on this tree, Node 22.23.3, linux-x64-gnu:
-npm test            # 12 passed, 0 failed, 4 files
+npm test            # 13 passed, 0 failed, 4 files
 npm run docs:verify # 20 code blocks + 4 examples, 0 failures
 ```
 

@@ -48,6 +48,31 @@ for (const [what, candidate] of cases) {
 	assert.equal(result, false, `${what} must not verify`);
 }
 
+// A rejection about the KEY rather than the signature — the case the cofactorless
+// equation got wrong. u = 0 converts through
+// MontgomeryPoint::to_edwards to the Edwards order-2 point (0, -1), and for
+// that A the equation [S]B = R + [k]A is satisfied by R = A, S = 0 for EVERY
+// message and EVERY key — so this forgery verifies under a public key that
+// was never anybody's. verify() calls verify_strict (src/lib.rs:206), which
+// rejects a small-order R and a weak A; tests/loworder-forgery.test.cjs and
+// tests/platform-loader.test.cjs pin the same thing, the second one against
+// oktz-signal's native curveVerify as well.
+//
+// The 32 bytes of R below are the little-endian encoding of y = -1, derived
+// here rather than copied: (0 - 1) / (0 + 1) = -1 mod (2^255 - 19).
+const ORDER_2_PUBKEY = new Uint8Array(32);
+const ORDER_2_SIGNATURE = Buffer.concat([
+	Buffer.from('ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f', 'hex'),
+	Buffer.alloc(32)
+]);
+
+for (const what of ['reject me', '', 'a different message']) {
+	const result = curve.verify(ORDER_2_PUBKEY, Buffer.from(what), ORDER_2_SIGNATURE);
+	console.log(`verify(all-zero public key, "${what}", R = A, S = 0) ->`, result);
+	assert.equal(result, false,
+		`the forged signature must not verify under the order-2 public key (message ${JSON.stringify(what)})`);
+}
+
 // The no-op case, stated so the distinction is on the record: masking byte 63
 // only changes the signature when the public key's sign bit was actually set.
 const masked = Buffer.from(signature);
