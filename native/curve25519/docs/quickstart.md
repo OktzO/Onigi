@@ -234,7 +234,7 @@ if (signalNative) {
 > The signatures are **identical**, because both implementations were given the
 > same nonce. That is the property that makes a fallback between them safe, and
 > it is the only one worth checking: with no third argument, `sign()` draws a
-> nonce from the platform CSPRNG (`src/lib.rs:108-116`) and so does
+> nonce from the platform CSPRNG (`src/lib.rs:113-121`) and so does
 > `oktz-signal`'s `curveSign` (`native/signal/src/curve.rs:123-140`, in that
 > crate's checkout, which this repository does not vendor), so two no-nonce
 > signatures differ even though both are valid. Neither derives the nonce from

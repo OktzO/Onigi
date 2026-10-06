@@ -11,15 +11,15 @@ an exception instead of a `false`. All of it is read from `index.cjs` and
 
 | Thing | Length | Enforced in |
 |---|---|---|
-| secret key (X25519 private scalar) | 32 | `index.cjs:68` (`sign`), `index.cjs:52` (`sharedKey`), `src/lib.rs:153` |
-| public key (X25519 `u` coordinate) | 32 | `index.cjs:77` (`verify`), `index.cjs:51` (`sharedKey`), `src/lib.rs:175` |
-| signature (`R ‖ S`) | 64 | `index.cjs:78`, `src/lib.rs:176` |
-| `opt_random` nonce | 64 | `index.cjs:70`, `src/lib.rs:156` |
+| secret key (X25519 private scalar) | 32 | `index.cjs:68` (`sign`), `index.cjs:52` (`sharedKey`), `src/lib.rs:158` |
+| public key (X25519 `u` coordinate) | 32 | `index.cjs:77` (`verify`), `index.cjs:51` (`sharedKey`), `src/lib.rs:180` |
+| signature (`R ‖ S`) | 64 | `index.cjs:78`, `src/lib.rs:181` |
+| `opt_random` nonce | 64 | `index.cjs:70`, `src/lib.rs:161` |
 | `generateKeyPair` seed | 32 | `index.cjs:33` |
 
 Every one of these is checked **twice** — once in `index.cjs`'s `checkLen`
 before the call crosses into the addon, and again in Rust's `check_len`
-(`src/lib.rs:32-42`). The JavaScript check is the one that fires, so the
+(`src/lib.rs:36-46`). The JavaScript check is the one that fires, so the
 message a caller sees comes from `index.cjs:22-25` and does not name the
 lengths:
 
@@ -185,23 +185,23 @@ order `L ≈ 2^252`, so it occupies 252 bits and its top four bits are zero.
 The bit that is *not* part of `S` is bit 7 of byte 63: the sign bit of the
 public key, transported inside the signature.
 
-**Sign** — `src/lib.rs:101` reads it off the compressed public key and
-`src/lib.rs:134` writes it in:
+**Sign** — `src/lib.rs:106` reads it off the compressed public key and
+`src/lib.rs:139` writes it in:
 
 ```js illustrative
-let sign_bit = a_bytes[31] & 128;   // src/lib.rs:101
+let sign_bit = a_bytes[31] & 128;   // src/lib.rs:106
 // …
-sig[32..64].copy_from_slice(&s_bytes);  // src/lib.rs:132
-sig[63] |= sign_bit;                    // src/lib.rs:134
+sig[32..64].copy_from_slice(&s_bytes);  // src/lib.rs:137
+sig[63] |= sign_bit;                    // src/lib.rs:139
 ```
 
-**Verify** — `src/lib.rs:181` reads it back out to reconstruct the Edwards
-public key, and `src/lib.rs:189` clears it to recover the real `S`:
+**Verify** — `src/lib.rs:186` reads it back out to reconstruct the Edwards
+public key, and `src/lib.rs:194` clears it to recover the real `S`:
 
 ```js illustrative
-let sign_bit = sig[63] & 128;            // src/lib.rs:181
+let sign_bit = sig[63] & 128;            // src/lib.rs:186
 let a_bytes = match pubkey_montgomery_to_edwards(&pk, sign_bit >> 7) { … };
-sig_clean[63] &= 127;                    // src/lib.rs:189
+sig_clean[63] &= 127;                    // src/lib.rs:194
 ```
 
 Consequences a caller can observe:
@@ -267,14 +267,14 @@ console.log('a toggled bit 7 never verifies; a masked bit 7 only matters when it
 This is not an encoding choice you can make differently at the call site, but
 it explains the sizes. X25519 public keys are the Montgomery form: 32 bytes
 holding the `u` coordinate. `verify()` converts to Edwards internally with
-`MontgomeryPoint::to_edwards` (`src/lib.rs:140-143`) and hands the result to
+`MontgomeryPoint::to_edwards` (`src/lib.rs:145-148`) and hands the result to
 `ed25519-dalek`.
 
 The conversion can fail — a `u` with no Edwards preimage — and when it does,
-`verify()` returns `false` rather than throwing (`src/lib.rs:182-185`):
+`verify()` returns `false` rather than throwing (`src/lib.rs:187-190`):
 
 ```js illustrative
-// src/lib.rs:182-185
+// src/lib.rs:187-190
 let a_bytes = match pubkey_montgomery_to_edwards(&pk, sign_bit >> 7) {
     Some(p) => p.compress().to_bytes(),
     None => return Ok(false),
@@ -338,7 +338,7 @@ still throws — it just does not influence the result. See
 ## 6. The nonce is random unless you pin it
 
 `sign(secretKey, msg)` with no third argument draws a 64-byte nonce from the
-platform CSPRNG (`getrandom`, `src/lib.rs:108-116`). Two calls with the same key
+platform CSPRNG (`getrandom`, `src/lib.rs:113-121`). Two calls with the same key
 over the same message therefore produce **different** signatures. Passing a
 third argument pins the nonce, and then the output is byte-identical every time.
 
@@ -370,7 +370,7 @@ console.log('sign(k, m) vs sign(k, m, rnd) -> different, and both verify');
 
 The nonce path hashes it with a distinct prefix so the two derivations cannot
 collide: `r = SHA512(0xfe ‖ 0xff×31 ‖ sk ‖ m ‖ rnd) mod L`
-(`src/lib.rs:55-64`). That is the derivation XEdDSA specifies and what
+(`src/lib.rs:59-69`). That is the derivation XEdDSA specifies and what
 `libsignal` gets from `curve25519-js` by way of `crypto_sign_direct_rnd`, so
 pinning the nonce is what keeps this package byte-compatible with it.
 

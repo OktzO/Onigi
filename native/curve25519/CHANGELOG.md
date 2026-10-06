@@ -4,9 +4,9 @@ All notable changes to `oktz-curve25519`. This directory is vendored into the
 `Onigi` repository and has its own CI (`.github/workflows/ci.yml` and
 `release.yml`) and its own `napi.config.json`; the commits below are the real
 ones from `git log -- native/curve25519`, and the file lists are the real
-ones in this tree. The four hashless bullets in the `next` section below are
+ones in this tree. The five hashless bullets in the `next` section below are
 the ones in the commits that write this file: a commit cannot contain its own
-hash, so those four are identified by subject rather than by identifier.
+hash, so those five are identified by subject rather than by identifier.
 
 The Rust crate's own version is `0.1.0` (`Cargo.toml`); the npm package's is
 `0.0.4`. They are independent.
@@ -31,7 +31,7 @@ below are commit hashes, not version numbers.
   `[S]B = R + [k]A` for **every** message and **every** key. So a caller that
   was handed a bogus 32-byte "public key" got `true` back for a signature
   nobody signed. `verify` now calls `vk.verify_strict`
-  (`src/lib.rs:201`), which rejects a small-order `R` and a weak `A`.
+  (`src/lib.rs:206`), which rejects a small-order `R` and a weak `A`.
   `oktz-signal` has been strict at the same point all along
   (`native/signal/src/curve.rs:175-178`, in that crate's checkout, which this
   repository does not vendor); the two implementations have to agree,
@@ -46,9 +46,9 @@ below are commit hashes, not version numbers.
   hidden-number-problem lattice attack documented at
   `native/signal/src/curve.rs:123-126` (in that crate's checkout, which this
   repository does not vendor). The `None` arm now fills a 64-byte
-  buffer from `getrandom` (`src/lib.rs:108-116`). A CSPRNG failure propagates
+  buffer from `getrandom` (`src/lib.rs:113-121`). A CSPRNG failure propagates
   out of `sign` rather than falling back to a predictable nonce, so
-  `sign_internal` returns `Result` (`src/lib.rs:88`) — and there is no code
+  `sign_internal` returns `Result` (`src/lib.rs:93`) — and there is no code
   path on which a fixed or zero nonce can be produced.
   - **`sign()` output is randomised, which is a behavioural break.** Two calls
     with one key over one message no longer return the same 64 bytes. Measured
@@ -81,7 +81,7 @@ below are commit hashes, not version numbers.
   `Zeroizing` buffer; the arithmetic form of the key — `a` and `r` in
   `sign_internal` — was left on the napi/worker stack after the call returned,
   for the life of the process. All four scalars are now wrapped in `Zeroizing`
-  (`src/lib.rs:98`, `src/lib.rs:113`, `src/lib.rs:122`, `src/lib.rs:127`)
+  (`src/lib.rs:103`, `src/lib.rs:118`, `src/lib.rs:127`, `src/lib.rs:132`)
   rather than zeroized by hand at chosen points, which makes the wipe
   unconditional on every exit path — including the CSPRNG error return the
   previous entry added. `h` and `s` are wrapped too, though neither is secret
@@ -91,14 +91,14 @@ below are commit hashes, not version numbers.
   the by-value form would copy the secrets back out of the guarded buffers. No
   observable behaviour change — the 48-signature explicit-`rnd` grid above was
   re-measured against a build of `0bd9500` and is byte-identical — and the note
-  at `src/lib.rs:204` records what is deliberately *not* covered: dalek's
+  at `src/lib.rs:209` records what is deliberately *not* covered: dalek's
   internal limb temporaries, the unwiped `h·a` product, and the caller-owned
   `Uint8Array`. Two residues that note records are actual secret bytes, and
   neither can be closed from this crate: `Scalar::from_bytes_mod_order` takes its 32
-  bytes by value, so the deref at `src/lib.rs:98` materialises an unwiped
+  bytes by value, so the deref at `src/lib.rs:103` materialises an unwiped
   `[u8; 32]` of the clamped secret for the duration of that call (dalek offers
   no `&[u8; 32]` constructor), and the `Sha512` state in `nonce_rnd` absorbs `sk`
-  at `src/lib.rs:59` and is dropped unwiped, because sha2 0.10.9 implements
+  at `src/lib.rs:63` and is dropped unwiped, because sha2 0.10.9 implements
   neither `Drop` nor `Zeroize` anywhere.
 - **Documentation corrected to match.** The README still described
   `sign()` as deterministic, `verify()` as cofactorless, "no test in this
@@ -117,16 +117,16 @@ below are commit hashes, not version numbers.
   — is weaker than the one that matters: a buffer is secret-equivalent if
   whoever holds it can recover `a` from the public `S = r + h·a`, given
   `r = SHA512(...) mod L`. Three buffers passed the weaker test and were
-  therefore missed: the `SHA512` digest in `nonce_rnd` (`src/lib.rs:62`), the
-  CSPRNG nonce `generated` (`src/lib.rs:108`), and the caller-supplied
-  `opt_random` nonce `rnd` (`src/lib.rs:154`). Each is a preimage of `r`, so
+  therefore missed: the `SHA512` digest in `nonce_rnd` (`src/lib.rs:66`), the
+  CSPRNG nonce `generated` (`src/lib.rs:113`), and the caller-supplied
+  `opt_random` nonce `rnd` (`src/lib.rs:159`). Each is a preimage of `r`, so
   each is as sensitive as `a`, and the note's own claim that `generated` was
   "not secret" was wrong for exactly that reason. All three are now in
-  `Zeroizing`; `digest` in `challenge` (`src/lib.rs:78`) is wrapped too, though
+  `Zeroizing`; `digest` in `challenge` (`src/lib.rs:83`) is wrapped too, though
   every input to it is public, so that the rule has no exceptions to remember.
   This is a fix in code, not another disclosure: `from_bytes_mod_order_wide`
   takes `&[u8; 64]`, so wrapping the digest costs nothing and the residue is
-  gone. `rnd` is caller-supplied, but so is `sk` at `src/lib.rs:159` and that was
+  gone. `rnd` is caller-supplied, but so is `sk` at `src/lib.rs:164` and that was
   already wrapped, so treating them differently would have been the
   inconsistency. Two further corrections fall out of the same finding. The
   note's "inside dalek" wording stopped one crate short: the `Sha512` state is
@@ -134,21 +134,26 @@ below are commit hashes, not version numbers.
   so the sentence now covers both dependencies. And the two superlatives that
   called the by-value argument slot *the* one secret-bytes residue have been
   retracted — there are two, and `src/lib.rs` and `README.md` now say so. Still
-no behaviour change: the 48-signature explicit-`rnd` grid re-measured against
-   a build of `69df139` is byte-identical, `npm test` is 12, and `docs:verify` is
-   20 blocks + 4 examples with 0 failures.
+  no behaviour change: the 48-signature explicit-`rnd` grid re-measured against
+  a build of `69df139` is byte-identical, `npm test` is 12, and `docs:verify` is
+  20 blocks + 4 examples with 0 failures.
 - **`clamp_scalar` no longer copies the secret at all, and the criterion that let
   that through now asks a second question.** `clamp_scalar` took `&[u8; 32]` and
   returned `[u8; 32]`, so `src/lib.rs` did two by-value copies of the key on every
   call: `let mut a = *sk;` put the **unclamped** key into a local no `Zeroizing`
   covered, and returning `a` copied it out again into the caller's guard.
   `clamp_scalar` now takes `&mut Zeroizing<[u8; 32]>` and clamps in place;
-  `sign_internal` takes that buffer by `&mut` (`src/lib.rs:89`) and `sign` creates
-  it at `src/lib.rs:159`. The 32-byte secret now enters this crate exactly once,
-  into a guard, and is never copied again. That is a fix in code, not a fourth
-  disclosure — the previous entry's *"Yang benar-benar secret dan TIDAK bisa
-  dihindari dari sini: DUA"* stays two, and `clamp_scalar` is no longer one of
-  them. The criterion in `src/lib.rs` was rewritten to be two mandatory
+  `sign_internal` takes that buffer by `&mut` (`src/lib.rs:94`) and `sign` creates
+  it at `src/lib.rs:164`. The 32-byte secret now enters this crate into a guard
+  once, and the **unclamped** copy is never materialised anywhere else. That is
+  a fix in code, not a fifth disclosure — the previous entry's *"Yang benar-benar
+  secret dan TIDAK bisa dihindari dari sini: DUA"* stays two, and `clamp_scalar`
+  is no longer one of them. An earlier draft of this sentence went further and
+  said the secret "is never copied again", which was false: the by-value argument
+  slot at `src/lib.rs:103` is exactly such a copy, as this same bullet records
+  above. The   corrected phrasing is the checkable one — a claim about
+  `clamp_scalar` and about which bytes exist, not about a copy count. The
+  criterion in `src/lib.rs` was rewritten to be two mandatory
   questions rather than one. The first is unchanged: is the buffer
   secret-equivalent, i.e. would whoever holds it be able to recover `a` from the
   public `S`? The second is new, and it is the one that was missing: **every
@@ -163,13 +168,14 @@ no behaviour change: the 48-signature explicit-`rnd` grid re-measured against
   no guard here can reach it; (c) a by-value temporary born of a by-value return
   and then read by something else.
   Re-running the extended criterion over the whole signing path found one residue
-  that no list had, and it is now named rather than missed: the
-  `GenericArray<u8, U64>` temporary that `h.finalize().into()` creates at
-  `src/lib.rs:62` — `FixedOutput::finalize_fixed` allocates `out` and returns it
-  by value, so the digest (a preimage of `r`, i.e. secret-equivalent) exists in
-  an unwiped slot before `.into()` puts it in the guard. Its twin at
-  `src/lib.rs:78` is the same code over public inputs. The note also records two
-  things that a re-run has to check rather than assume: `finalize_fixed_reset`
+  that no list had, and named rather than missed it: the `GenericArray<u8, U64>`
+  temporary that `h.finalize().into()` created at `src/lib.rs:66` —
+  `FixedOutput::finalize_fixed` allocates `out` and returns it by value, so the
+  digest (a preimage of `r`, i.e. secret-equivalent) existed in an unwiped slot
+  before `.into()` put it in the guard. Its twin at `src/lib.rs:83` is the same
+  code over public inputs. (That residue is gone as of the next entry, which is
+  why the sentence here still describes the old shape.) The note also records
+  two things that a re-run has to check rather than assume: `finalize_fixed_reset`
   does **not** close the sha2 residue, because `digest_pad`
   (`block-buffer-0.10.4/src/lib.rs:290`) only zeroes bytes *after* the block
   position and `BlockBuffer::reset` (line 180) only rewinds that position, so the
@@ -189,6 +195,69 @@ no behaviour change: the 48-signature explicit-`rnd` grid re-measured against
   arbitrary mostly-unclamped keys × 3 nonces × 8 messages, and 32 signatures over
   deliberately dirty clamp bits compared against `oktz-signal`'s independent
   native `curveSign` — plus 96 cross-implementation verify checks, both
+  low-order-forgery probes still rejected, and identical error messages.
+  `npm test` is 12 and `docs:verify` is 20 blocks + 4 examples with 0 failures.
+- **The `GenericArray` digest temporary is gone rather than disclosed, and the
+  escape clause that waved it through no longer exists.** The previous entry
+  named the `GenericArray<u8, U64>` that `h.finalize().into()` created at
+  `src/lib.rs:66` and then labelled it unavoidable, on the grounds that sha2
+  copies the digest internally on every finalisation path anyway. That was the
+  wrong call twice over. The copy sha2 makes is `full_res`, allocated in
+  `CtVariableCoreWrapper::finalize_fixed_core`; the `out` that
+  `FixedOutput::finalize_fixed` allocates (digest-0.10.7/src/lib.rs:99-103,
+  `let mut out = Default::default(); self.finalize_into(&mut out); out`) has its
+  *value* moved into the caller, so it belonged to this crate, not to sha2 — and
+  three documents credited it to sha2. And "sha2 does it anyway" is a reason a
+  residue cannot be eliminated, not a reason not to remove ours. `nonce_rnd` now
+  allocates the guard first and finalises straight into it:
+  `h.finalize_into_reset(GenericArray::from_mut_slice(&mut digest[..]))`
+  (`src/lib.rs:66-67`), so no unwiped slot in this crate's frame is ever
+  created. `sha2::digest::generic_array` is a re-export, so `Cargo.toml` is
+  unchanged and `generic-array` was **not** added as a dependency;
+  `Zeroizing<GenericArray<u8, U64>>` is still unavailable, which is why the fix
+  borrows the guard's own `&mut [u8]` instead.
+  Three claims that went with the disclosure are corrected rather than kept:
+  - The criterion's escape clause (`src/lib.rs:332`) used to read *"...atau
+    salinannya memang tidak bisa dihindari lalu dicatat"*, which is
+    unfalsifiable — it can be satisfied by asserting a fact. It now requires the
+    impossibility to be **demonstrated by naming the absent alternative**, and
+    gives the one legitimate use: dalek has no constructor taking `&[u8; 32]`.
+    A criterion satisfiable by assertion is what let this residue through.
+  - `src/lib.rs` said the product `h·a` was the only thing leaving its buffer.
+    It is not: `src/lib.rs:132` has two by-value returns, the product and then
+    the sum via `Add<&Scalar> for &Scalar`. Both are public-derived, so neither
+    is a residue, but the count was wrong.
+  - The residue entry at `src/lib.rs:367` told a reader that an unwiped
+    `[u8; 32]` exists, with no indication of the standard being asserted. It now
+    says so in the shipped text: the claim is **source-level, deliberately, and
+    makes no assertion about codegen** — whether a given build's optimiser
+    elides that copy is a fact about one rustc/opt-level/target and is not
+    something this file pins. That standard used to live only in the commit
+    report, which is not where a reader looks.
+  The README headline changed with it. "Secret keys are zeroized, in every
+  representation the signing path materialises" was contradicted by the same
+  bullet: the by-value argument slot at `src/lib.rs:103` is a representation the
+  signing path materialises and does not zeroize. It now reads "Every buffer
+  this crate itself materialises and keeps is wrapped in `Zeroizing`", which is
+  a claim about ownership and location rather than about a count of
+  representations, and stays true whatever the count comes out as.
+  The count of genuinely-secret-and-not-avoidable-from-here is **two**, but it is
+  two for a different reason than last time and the second item is smaller. The
+  `:103` by-value argument slot is unchanged: ours to place, dalek's to accept,
+  and dalek offers no `&[u8; 32]` constructor to place it in instead. The second
+  item was previously "sha2's block buffer plus its finalisation buffers", and
+  that second half was wrong in two ways at once — it was half ours, and it
+  mixed two different allocations. It is now only what is actually sha2's: the
+  block buffer that still holds `sk`, and `full_res` in
+  `CtVariableCoreWrapper::finalize_fixed_core`, which is on the path this fix now
+  takes — `CoreWrapper::finalize_into_reset` (wrapper.rs:185) calls
+  `finalize_fixed_core` and then only adds `core.reset()`/`buffer.reset()`. So
+  the fix does not remove `full_res`; it removes the part that was removable.
+  No behaviour change: the full byte-identity grid was re-run against this
+  round's base `9a17675` and against `7714bf8` two rounds back, and 848
+  explicit-`rnd` signatures are byte-identical to both, plus 32 of them also
+  identical to `oktz-signal`'s independent native `curveSign`, 96
+  cross-implementation verify checks, 24 clamp-invariance pairs, both
   low-order-forgery probes still rejected, and identical error messages.
   `npm test` is 12 and `docs:verify` is 20 blocks + 4 examples with 0 failures.
 

@@ -258,9 +258,9 @@ Full version with citations: [docs/encoding.md](docs/encoding.md).
   `false` never says which.
 - Byte 63 of the signature carries the public key's sign bit in bit 7; the
   scalar `S` below it leaves bits 4-6 clear, because `S < L < 2^252`
-  (`src/lib.rs:101`, `src/lib.rs:134`, and the reverse at `src/lib.rs:181-189`).
+  (`src/lib.rs:106`, `src/lib.rs:139`, and the reverse at `src/lib.rs:186-194`).
 - A 32-byte value that is not a real public key returns `false`, not a throw
-  (`src/lib.rs:182-185`).
+  (`src/lib.rs:187-190`).
 
 ---
 
@@ -291,16 +291,16 @@ to the key it claims to. It is **not**:
 
 Verified by reading `src/lib.rs` and by running it:
 
-- **Secret keys are zeroized, in every representation the signing path
-  materialises.** The 32-byte secret enters this crate exactly once, into a
-  `zeroize::Zeroizing` buffer at `src/lib.rs:159`, and is clamped **in place** at
-  `src/lib.rs:94` — `clamp_scalar` takes `&mut Zeroizing<[u8; 32]>`, so the
-  unclamped copy is never materialised anywhere else. Each `Scalar` is wrapped
-  too — `a`, `r`, `h` and `s` in `sign_internal` (`src/lib.rs:98`,
-  `src/lib.rs:113`, `src/lib.rs:122`, `src/lib.rs:127`) — together with three
+- **Every buffer this crate itself materialises and keeps is wrapped in
+  `Zeroizing`.** The 32-byte secret enters this crate into a
+  `zeroize::Zeroizing` buffer at `src/lib.rs:164`, and is clamped **in place** at
+  `src/lib.rs:99` — `clamp_scalar` takes `&mut Zeroizing<[u8; 32]>`, so the
+  **unclamped** copy is never materialised anywhere else. Each `Scalar` is
+  wrapped too — `a`, `r`, `h` and `s` in `sign_internal` (`src/lib.rs:103`,
+  `src/lib.rs:118`, `src/lib.rs:127`, `src/lib.rs:132`) — together with three
   buffers that are secret-equivalent to `a`: the `SHA512` digest in `nonce_rnd`
-  (`src/lib.rs:62`), the CSPRNG nonce `generated` (`src/lib.rs:108`), and the
-  caller-supplied `opt_random` nonce `rnd` (`src/lib.rs:154`). Each is a
+  (`src/lib.rs:66`), the CSPRNG nonce `generated` (`src/lib.rs:113`), and the
+  caller-supplied `opt_random` nonce `rnd` (`src/lib.rs:159`). Each is a
   preimage of `r`, and from the public `S` and `h` that gives
   `a = (S − r)·h⁻¹`. The wrap is the substance here, not the style:
   `curve25519-dalek`'s `Scalar` has a manual `Zeroize` impl and **no `Drop`**, so
@@ -308,21 +308,26 @@ Verified by reading `src/lib.rs` and by running it:
   `Scalar` wipe itself — the arithmetic form of the key would otherwise sit in
   freed stack memory for the life of the process.
   Wrapping makes the wipe unconditional on every exit path, including the
-  error return when the CSPRNG cannot be read. Two honest limits, both
-  recorded at `src/lib.rs:249`: `&*h * &*a` still materialises the product as
-  an unwiped `Scalar` temporary, because that is the `Mul` impl's return value
-  — harmless here, since `h` is public and `a` is not recoverable from `h·a`
-  without already holding `a`; and `Zeroizing` bounds this crate's own buffers,
-  not the ones inside its dependencies — `curve25519-dalek`'s `UnpackedScalar`
-  limb temporaries, and in sha2 0.10.9 both the `Sha512` state that `nonce_rnd`
-  feeds the secret key into at `src/lib.rs:59` (sha2 has neither `Drop` nor
-  `Zeroize` anywhere, and `finalize_fixed_reset` does not help: `digest_pad`
-  only zeroes bytes *after* the block position, and `BlockBuffer::reset` only
-  rewinds the position) and the temporaries sha2's finalisation allocates
-  before the digest reaches the guard. Separately, of the four scalars only `a`
-  and `r` are secret — `h` is `SHA512(R ‖ A ‖ m)` over public values and `S` is
-  published in the signature itself, so those two are wrapped for uniformity
-  rather than necessity.
+  error return when the CSPRNG cannot be read. The digest is finalised
+  **directly into** that guard — `finalize_into_reset` over a
+  `GenericArray::from_mut_slice(&mut digest[..])` at `src/lib.rs:67` — rather
+  than through `h.finalize().into()`, which returned a `GenericArray` by value
+  and so put the secret digest in an unwiped slot in *this* crate's frame first.
+  Two honest limits, both recorded at `src/lib.rs:257`: `&*r + &*h * &*a`
+  materialises two unwiped `Scalar` temporaries, the product and then the sum,
+  because each is the return value of a `Mul`/`Add` impl — harmless here, since
+  `h` is public and `a` is not recoverable from `h·a` or `r + h·a` without
+  already holding `a`; and `Zeroizing` bounds this crate's own buffers, not the
+  ones inside its dependencies — `curve25519-dalek`'s `UnpackedScalar` limb
+  temporaries, and in sha2 0.10.9 the `Sha512` state that `nonce_rnd` feeds the
+  secret key into at `src/lib.rs:63` (sha2 has neither `Drop` nor `Zeroize`
+  anywhere, and `finalize_fixed_reset` does not help: `digest_pad` only zeroes
+  bytes *after* the block position, and `BlockBuffer::reset` only rewinds the
+  position) plus `full_res` in `CtVariableCoreWrapper::finalize_fixed_core`,
+  which every finalisation path allocates unwiped. Separately, of the four
+  scalars only `a` and `r` are secret — `h` is `SHA512(R ‖ A ‖ m)` over public
+  values and `S` is published in the signature itself, so those two are wrapped
+  for uniformity rather than necessity.
   `curve25519-dalek` and `ed25519-dalek` are both pulled in with the `zeroize`
   feature (`Cargo.toml`). Two questions decide the rule, and a buffer has to
   pass both: **is it secret-equivalent** — would whoever holds it be able to
@@ -339,16 +344,23 @@ Verified by reading `src/lib.rs` and by running it:
   they are not zeroized here — napi hands them over as borrowed `&[u8]` views
   onto JS memory (`napi_get_typedarray_info`), so nothing in this crate copies
   them either. What is left outside any guard is on our side of the boundary,
-  and it is not the caller's bytes:
+  and it is not the caller's bytes. Two things, and it is worth being precise
+  about whose they are, because only one of them is sha2's:
   `Scalar::from_bytes_mod_order` takes its 32 bytes **by value**, so the `**sk`
-  at `src/lib.rs:98` materialises an unwiped `[u8; 32]` for the duration of that
-  call (dalek has no `&[u8; 32]`-taking constructor), and the `Sha512` buffers
-  above hold `sk`, or a preimage of `r`, until they are dropped unwiped. Both are
-  recorded at `src/lib.rs:331` as open, not as fixed.
+  at `src/lib.rs:103` materialises an unwiped `[u8; 32]` for the duration of that
+  call — ours, in dalek's frame, unavoidable here only because dalek has no
+  `&[u8; 32]`-taking constructor to call instead. The other one really is
+  sha2's: the `Sha512` buffers above hold `sk`, or a preimage of `r`, until they
+  are dropped unwiped. The `GenericArray` that sha2's `finalize_fixed` used to
+  return by value was **not** in that second group — its value landed in this
+  crate's frame, so it was ours to fix, and it is fixed. Both remaining items are
+  recorded at `src/lib.rs:367` as open, not as fixed, and that entry states
+  plainly that the claim is a source-level one and makes no assertion about what
+  any particular build's codegen does with it.
 - **No `unsafe` in the Rust.** `#![deny(unsafe_code)]` is the first line of
   `src/lib.rs`. Verification is delegated to `ed25519-dalek` rather than
-  hand-rolled (`src/lib.rs:170-172` says why).
-- **`verify()` uses the strict equation.** `src/lib.rs:201` calls
+  hand-rolled (`src/lib.rs:175-177` says why).
+- **`verify()` uses the strict equation.** `src/lib.rs:206` calls
   `vk.verify_strict(...)`, not the cofactorless `vk.verify(...)`. That is not a
   stylistic choice: the cofactorless equation accepts a forged signature
   whenever the public key is a small-order point, because `u = 0` maps to the
@@ -364,7 +376,7 @@ Verified by reading `src/lib.rs` and by running it:
 ### One thing a caller should know before using it
 
 **`sign()` is randomised unless you pin the nonce.** With no third argument the
-nonce is 64 bytes from the platform CSPRNG (`src/lib.rs:108-116`), so two calls
+nonce is 64 bytes from the platform CSPRNG (`src/lib.rs:113-121`), so two calls
 with the same key over the same message return different signatures. Measured
 on this tree: over 64 distinct keypairs, 0/64 pairs of no-nonce signatures came
 back byte-identical. Bit 7 of byte 63 is the public key's, not the nonce's —
@@ -385,7 +397,7 @@ be read, `sign` throws rather than fall back to a predictable nonce.
 **Pass a 64-byte nonce only if you need a reproducible signature** — to compare
 against a value another implementation produced, or to pin a test vector. It is
 the third argument, and that path hashes it under a distinct prefix,
-`SHA512(0xfe ‖ 0xff×31 ‖ sk ‖ m ‖ rnd) mod L` (`src/lib.rs:55-64`), which is
+`SHA512(0xfe ‖ 0xff×31 ‖ sk ‖ m ‖ rnd) mod L` (`src/lib.rs:59-69`), which is
 the derivation `curve25519-js@0.0.4`, `libsignal` and WhatsApp use — so it is
 also what keeps this package byte-compatible with them. A nonce you pass in
 determines the output; a nonce left out does not. Two caller-supplied nonces

@@ -21,6 +21,10 @@ use curve25519_dalek::MontgomeryPoint;
 use ed25519_dalek::{Signature, VerifyingKey};
 
 use sha2::{Digest, Sha512};
+// Re-export dari `sha2::digest`, bukan dependensi baru: `generic-array` sendiri
+// tidak masuk Cargo.toml. Dipakai supaya digest masuk ke guard TANPA lewat
+// temporer by-value milik crate ini (lihat catatan zeroization di akhir file).
+use sha2::digest::generic_array::GenericArray;
 
 use zeroize::Zeroizing;
 
@@ -59,7 +63,8 @@ fn nonce_rnd(sk: &[u8; 32], msg: &[u8], rnd: &[u8]) -> Scalar {
     h.update(sk);
     h.update(msg);
     h.update(rnd);
-    let digest = Zeroizing::new(h.finalize().into());
+    let mut digest = Zeroizing::new([0u8; 64]);
+    h.finalize_into_reset(GenericArray::from_mut_slice(&mut digest[..]));
     Scalar::from_bytes_mod_order_wide(&digest)
 }
 
@@ -205,8 +210,8 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 //
 // Dua lapis yang berbeda, dan hanya yang pertama yang otomatis:
 //
-// 1. Byte buffer di `Zeroizing`: `sk` (94, 159), `digest` di kedua fungsi
-//    SHA-512 (62, 78), `generated` (108), `rnd` (154). Wipe-nya otomatis lewat
+// 1. Byte buffer di `Zeroizing`: `sk` (99, 164), `digest` di kedua fungsi
+//    SHA-512 (66, 83), `generated` (113), `rnd` (159). Wipe-nya otomatis lewat
 //    `Drop` (zeroize-1.9.0/src/lib.rs:696) → `Z::zeroize`.
 // 2. `Scalar` — representasi aritmetika — juga di `Zeroizing`. TAPI
 //    `curve25519_dalek::Scalar` (curve25519-dalek-4.1.3/src/scalar.rs:195)
@@ -214,17 +219,17 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 //    baris 556 dan TIDAK ada `impl Drop`. Fitur `zeroize` di Cargo.toml membuat
 //    `scalar.zeroize()` bisa dipanggil tanpa membuat `Scalar` hapus dirinya.
 //
-// Yang secret-derived: `a`, `r`, `digest` di `nonce_rnd` (62), `generated` (108)
-// dan `rnd` (154). Tiga yang terakhir semuanya preimage `r` atau lebih dekat ke
+// Yang secret-derived: `a`, `r`, `digest` di `nonce_rnd` (66), `generated` (113)
+// dan `rnd` (159). Tiga yang terakhir semuanya preimage `r` atau lebih dekat ke
 // sana — dari `S` dan `h` yang publik orang bisa ambil `a = (S − r)·h⁻¹` — jadi
 // secret-equivalent dengan `a`, bukan hanya "bukan turunan secret" seperti klaim
-// lama soal `generated`. `h`, `s`, dan `digest` di `challenge` (78) ikut
+// lama soal `generated`. `h`, `s`, dan `digest` di `challenge` (83) ikut
 // dibungkus demi aturan seragam; inputnya publik semua, daftarnya ada di bawah.
 //
 // Dibungkus, bukan diberi `.zeroize()` di titik-titik pilihan: pembungkus
 // membuat wipe terjadi di SETIEMAP jalur keluar — termasuk `?` CSPRNG di
-// baris 111 dan error yang dipropagasikan `sign` di baris 160 — tanpa harus
-// mengingat setiap `return`. Length check di baris 153/156 bukan contoh:
+// baris 116 dan error yang dipropagasikan `sign` di baris 165 — tanpa harus
+// mengingat setiap `return`. Length check di baris 158/161 bukan contoh:
 // keduanya jalan sebelum ada salinan secret di sisi Rust, dan `Uint8Array`
 // pemanggil tetap milik pemanggil.
 //
@@ -243,31 +248,47 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 // - `&*r + &*h * &*a` memakai `impl Mul<&Scalar> for &Scalar` (scalar.rs:323)
 //   dan `impl Add<&Scalar> for &Scalar` (scalar.rs:340). Keduanya membaca lewat
 //   reference, jadi `a`, `r`, dan `h` sendiri tidak pernah keluar dari buffer-nya
-//   sebagai nilai `Scalar`; yang diambil by-value hanya produk `h * a` lalu
-//   jumlahnya (lihat batasannya).
+//   sebagai nilai `Scalar`. Yang keluar by-value ada DUA, keduanya di baris 132:
+//   produk `h * a` (return `Mul`) lalu jumlahnya (return `Add`) — bukan satu,
+//   seperti klaim lama di catatan ini. Keduanya langsung dipindah ke dalam
+//   `Zeroizing::new` pada baris yang sama, jadi tidak ada temporer ketiga yang
+//   memegang salah satunya.
 //
 // Batasnya, jujur:
 //
-// - Produk `h * a` tetap dimaterialisasi sebagai `Scalar` sementara yang tidak
-//   di-wipe — itu return value dari impl `Mul` di atas, dan tidak bisa dihindari
-//   tanpa memanggil `.zeroize()` manual pada hasilnya. Tidak masalah: `h`
-//   publik, jadi yang tertinggal adalah `h·a`, dan `a` tidak dapat diambil dari
-//   `h·a` tanpa sudah memegang `a`. Yang berbahaya adalah salinan `a`/`r`.
+// - Dua nilai by-value baris 132 itu, masing-masing di frame `Mul` dan frame `Add`,
+//   tidak di-wipe. Tidak masalah: `h` sudah publik, jadi yang tertinggal adalah
+//   `h·a` lalu `r + h·a`, dan `a` tidak dapat diambil dari keduanya tanpa sudah
+//   memegang `a`. Yang berbahaya adalah salinan `a`/`r`, dan itulah yang tidak
+//   terjadi di baris itu.
 // - Yang menyerap byte secret lalu dibuang tanpa wipe ada di dalam DEPENDENCY,
-//   di dua tempat, dan `Zeroizing` crate ini tidak bisa menjangkau keduanya:
+//   dan `Zeroizing` crate ini tidak bisa menjangkau:
 //   - dalek: `Scalar::unpack()` (scalar.rs:1119) dan operasi limbanya membuat
 //     `UnpackedScalar` sementara yang dalek sendiri tidak zeroize (yang di-wipe
 //     hanya scratch `batch_invert`, scalar.rs:834). Isinya limb `a` dan `r`.
-//   - sha2 0.10.9, dua sisi. (i) State `Sha512` di `nonce_rnd` (baris 56-61)
-//     menyerap `sk` lewat `h.update(sk)` di baris 59; `digest_pad`
+//   - sha2 0.10.9, dua hal, dan ownership-nya dipisah karena sebelumnya keduanya
+//     disampur jadi "milik sha2":
+//     (i) State `Sha512` di `nonce_rnd` (baris 60-65) menyerap `sk` lewat
+//     `h.update(sk)` di baris 63; `digest_pad`
 //     (block-buffer-0.10.4/src/lib.rs:290) hanya meng-nol byte SETELAH posisi
 //     blok dan `BlockBuffer::reset` (baris 180) hanya mengembalikan posisi, jadi
 //     `finalize_fixed_reset` tidak menolong — `sk` masih ada saat hasher di-drop.
-//     (ii) Jalur finalisasi sha2 menyalin digest ke buffer yang tidak di-wipe
-//     sebelum kita menerimanya: `FixedOutput::finalize_fixed`
-//     (digest-0.10.7/src/lib.rs:99) mengalokasikan `out` lalu mengembalikannya by
-//     value, dan `CtVariableCoreWrapper::finalize_fixed_core` (ct_variable.rs:119)
-//     mengalokasikan `full_res`. Yang kita guard hanya `[u8; 64]` yang diterima.
+//     (ii) `CtVariableCoreWrapper::finalize_fixed_core` (ct_variable.rs:119)
+//     mengalokasikan `full_res` yang tidak di-wipe. Ini milik sha2 dan ada di
+//     SETIAP jalur finalisasi: `CoreWrapper::finalize_into_reset`
+//     (wrapper.rs:185) memanggil `finalize_fixed_core` lalu menambah
+//     `core.reset()`/`buffer.reset()`, dan tidak ada API sha2 yang menulis digest
+//     tanpa lewat situ.
+//     Yang BUKAN milik sha2, dan sekarang hilang: `out` di
+//     `FixedOutput::finalize_fixed` (digest-0.10.7/src/lib.rs:99-103,
+//     `let mut out = Default::default(); self.finalize_into(&mut out); out`).
+//     `out` dialokasikan di frame `finalize_fixed`, tapi NILAI-nya dipindah ke
+//     frame kita, jadi itu salinan milik crate ini — bisa dihapus, dan dihapus:
+//     baris 67 memanggil `finalize_into_reset(GenericArray::from_mut_slice(&mut
+//     digest[..]))`, yang menulis digest langsung ke dalam guard, sehingga `out`
+//     tidak pernah muncul di frame kita. Bentuk lamanya — `let digest =
+//     Zeroizing::new(h.finalize().into())`, satu baris di mana `out` sekarang
+//     hidup — memang mematerialisasikannya di slot yang tidak di-wipe.
 //   `Zeroizing<Scalar>` menjaga representasi kanonik 32 byte saja. Jadi ini
 //   membatasi residue, bukan menjamin "tidak ada sisa".
 //
@@ -290,8 +311,8 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 // 1. APAKAH INI SECRET-EQUIVALENT? Sebuah buffer dianggap secret-equivalent kalau
 //    siapa pun yang memegangnya bisa mendapat `a` dari `S = r + h·a` yang publik,
 //    dengan `r = SHA512(...) mod L`. Buffer seperti itu dibungkus. "Bukan turunan
-//    secret" BELUM tentu lolos: `digest` baris 62, `generated` baris 108, dan
-//    `rnd` baris 154 tidak satu pun diturunkan dari `sk`, dan ketiganya tetap
+//    secret" BELUM tentu lolos: `digest` baris 66, `generated` baris 113, dan
+//    `rnd` baris 159 tidak satu pun diturunkan dari `sk`, dan ketiganya tetap
 //    dibungkus justru karena semuanya preimage `r`.
 // 2. APAKAH ADA SALINAN BY-VALUE-NYA? Setiap argumen by-value dan setiap return
 //    by-value di jalur signing adalah salinan byte secret ke memori yang crate ini
@@ -305,40 +326,79 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 //    dependency — `from_bytes_mod_order` mau `[u8; 32]` positional (scalar.rs:237),
 //    dan salinannya ada di frame callee sehingga `Zeroizing` di sini tidak bisa
 //    menjangkau; (c) temporer by-value yang lahir dari return by-value lalu dibaca
-//    oleh yang lain — `h.finalize().into()` di baris 62 dan 78.
+//    oleh yang lain — `h.finalize().into()` di baris 66 dan 83 pada versi
+//    sebelumnya file ini, yang keduanya sudah hilang (lihat di bawah).
 //
 // Lolos kalau salah satu: byte-nya publik atau milik pemanggil; ATAU rentang dari
-// sumber sampai guard-nya seluruhnya tertutup `Zeroizing`; ATAU salinannya memang
-// tidak bisa dihindari lalu DICATAT di bawah. Kriteria di atas, dijalankan ulang ke
-// seluruh jalur signing; salinan by-value yang diperiksa dan disposition-nya:
-// - SECRET: `**sk` baris 98 → argumen by-value `from_bytes_mod_order`, bentuk (b),
-//   tidak bisa dihindari → dicatat. Temporer `GenericArray` dari `h.finalize()`
-//   baris 62, bentuk (c), tidak bisa dihindari → dicatat. `a`, `r`, `h`, `s` sendiri
-//   tidak punya salinan by-value; satu-satunya yang keluar dari buffer-nya adalah
-//   produk `h·a`, yang limitnya sudah disebut di atas.
+// sumber sampai guard-nya seluruhnya tertutup `Zeroizing`; ATAU salinannya tidak
+// bisa dihindari — dan klausa terakhir ini hanya sah kalau mustahilnya
+// DIBUKTIKAN dengan menyebut alternatif yang ABSEN, bukan sekadar diklaim.
+// Contoh yang sah, dan memang yang berlaku untuk baris 103: "dalek tidak punya
+// konstruktor yang menerima `&[u8; 32]`", jadi slot argumen itu tidak bisa
+// dihilangkan dari file ini. Yang tidak sah adalah "tidak bisa dihindari"
+// tanpa nama — kriteria yang bisa dipenuhi dengan MENYATAKAN sebuah fakta bukan
+// kriteria, dan itulah celah yang membuat salinan `GenericArray` di baris 66 lolos
+// satu putaran: ia ditemukan, lalu dituliskan sebagai tidak bisa dihindari, padahal
+// ada alternatifnya (`finalize_into_reset` ke dalam `&mut [u8]` milik kita) yang
+// justru dipakai di baris 67 sekarang. Kalau alternatifnya tidak ada, sebutkan
+// konstruktor atau fungsi yang dicari dan tidak ditemukan; kalau ada, itu salinan
+// dan harus dihapus.
+//
+// Kriteria di atas, dijalankan ulang ke seluruh jalur signing; salinan by-value
+// yang diperiksa dan disposition-nya:
+// - SECRET: `**sk` baris 103 → argumen by-value `from_bytes_mod_order`, bentuk (b),
+//   tidak bisa dihindari → dicatat, dengan alternatif absen yang disebut nama di
+//   atas. `a`, `r`, `h`, `s` sendiri tidak punya salinan by-value; yang keluar dari
+//   buffer-nya hanya dua nilai baris 132, produk lalu jumlahnya, keduanya
+//   public-derived.
 // - PUBLIK, jadi sengaja tidak dibungkus: `p`/`CompressedEdwardsY` di
 //   `base_mult_scalar` (= `A`), `r_bytes` (= `R`), `s_bytes` (= `S`), `sig`,
-//   `digest` baris 78 (`SHA512(R ‖ A ‖ m)`), `sign_bit`.
+//   `digest` baris 83 (`SHA512(R ‖ A ‖ m)`), `sign_bit`.
 // - MEMILIK PEMANGGIL: `secret_key`, `opt_random`, `msg` — dipinjam lewat `&`.
-// - SUDAH DI-GUARD dari sumber sampai akhir: `sk` baris 159 (dibuat dari
-//   `&secret_key[..32]`, lalu di-clamp IN PLACE di baris 94 — nol salinan),
-//   `generated` baris 108, `rnd` baris 154, `digest` baris 62 dan 78.
+// - SUDAH DI-GUARD dari sumber sampai akhir: `sk` baris 164 (dibuat dari
+//   `&secret_key[..32]`, lalu di-clamp IN PLACE di baris 99 — nol salinan),
+//   `generated` baris 113, `rnd` baris 159, `digest` baris 66 dan 83.
 // - PASS BY-REFERENCE, jadi tidak menyalin sama sekali: `check_len`,
 //   `base_mult_scalar` (`&Scalar`), `challenge(&r_bytes, &a_bytes, msg)`,
 //   `nonce_rnd` di kedua arm (semuanya `&[u8]`), `getrandom(&mut generated[..])`,
-//   `s.to_bytes()` (lewat `&self`), `copy_from_slice(&r_bytes)`/`(&s_bytes)`.
+//   `s.to_bytes()` (lewat `&self`), `copy_from_slice(&r_bytes)`/`(&s_bytes)`, dan
+//   `GenericArray::from_mut_slice(&mut digest[..])` di baris 67.
 //
-// Yang benar-benar secret dan TIDAK bisa dihindari dari sini: DUA.
-// 1. `Scalar::from_bytes_mod_order` menerima 32 byte itu BY VALUE
-//    (curve25519-dalek-4.1.3/src/scalar.rs:237), jadi `**sk` di baris 98 — hasil
-//    dua kali deref dari `&mut Zeroizing<[u8; 32]>` — mematerialisasi salinan
-//    `[u8; 32]` dari secret yang sudah di-clamp ke dalam slot argumennya, dan tidak
-//    ada yang meng-wipe-nya selama panggilan itu berjalan. dalek tidak punya
-//    konstruktor yang menerima `&[u8; 32]`, dan tidak ada penataan ulang di file ini
-//    yang menghindari panggilan by-value tersebut.
-// 2. Yang di dalam sha2, sudah disebut di batasannya di atas: block buffer yang
-//    masih memuat `sk`, dan temporer-temporer digest di jalur finalisasinya.
-//    Keduanya dialokasikan oleh sha2 dan tidak punya wipe.
-// Dua-duanya di luar jangkauan `Zeroizing` crate ini. Dicatat, bukan diklaim hilang.
-// Yang hilang di kode, bukan cuma dicatat: salinan `clamp_scalar` yang lama — local
-// tak ber-guard berisi key yang belum di-clamp, plus return by-value-nya.
+// Yang benar-benar secret dan TIDAK bisa dihindari dari sini: DUA. Standard yang
+// dipakai dinyatakan terbuka di depan kedua butir: ini SOURCE-level, dengan
+// sengaja, dan tidak bergantung pada codegen.
+// 1. Slot argumen by-value `**sk` di baris 103. Standard yang dipakai di sini
+//    dinyatakan terbuka: ini klaim level SOURCE — nilai `[u8; 32]` itu ada di
+//    slot argumen sebagai objek tersendiri di sumber, dan tidak ada yang
+//    meng-wipe-nya. Sengaja tidak ada klaim apa pun tentang codegen: apakah
+//    optimiser benar-benar menyalin byte ke sana, atau meng-optimasi salinan itu
+//    pada build tertentu, tidak diklaim di sini dan tidak boleh disandarkan pada
+//    catatan ini. Yang diklaim hanya bentuknya di sumber, dan itu bentuknya
+//    memang ada, apa pun yang terjadi setelahnya.
+//    Alasannya tidak bisa dihapus dari file ini: `Scalar::from_bytes_mod_order`
+//    menerima 32 byte itu BY VALUE (curve25519-dalek-4.1.3/src/scalar.rs:237),
+//    dan dalek tidak punya konstruktor yang menerima `&[u8; 32]` — dua fungsi
+//    constructor-nya (scalar.rs:237 dan :250) keduanya positional. `**sk` —
+//    hasil dua kali deref dari `&mut Zeroizing<[u8; 32]>` — memanggil yang itu,
+//    jadi slot argumennya terisi dan tidak ada penataan ulang di file ini yang
+//    memanggilnya lewat `&`. Salinan ini milik frame callee, di luar jangkauan
+//    `Zeroizing` crate ini.
+// 2. Yang di dalam sha2, sudah disebut lengkap di batasannya di atas: block
+//    buffer yang masih memuat `sk`, dan `full_res` di
+//    `finalize_fixed_core`. Keduanya dialokasikan sha2 di frame-nya sendiri, dan
+//    tidak punya wipe maupun `Drop` — sha2 0.10.9 tidak mengimplementasikan
+//    salah satu pun.
+// Dua-duanya di luar jangkauan `Zeroizing` crate ini. Dicatat, bukan diklaim
+// hilang, dan yang tersisa bukan "salinan yang lupa dihapus" melainkan dua
+// tempat yang tidak punya API untuk dihapus dari sini.
+//
+// Yang hilang di kode, bukan cuma dicatat: salinan `clamp_scalar` yang lama —
+// local tak ber-guard berisi key yang belum di-clamp, plus return by-value-nya —
+// dan temporer `GenericArray` dari `h.finalize().into()` yang dulu ada di baris
+// 66 sebelum perubahan ini. Yang kedua hilang karena crate ini menulis digest
+// langsung ke dalam `&mut` miliknya sendiri; `Zeroizing<GenericArray<u8, U64>>`
+// sendiri tidak tersedia di sini (`generic-array` meng-gate impl `Zeroize`-nya di
+// balik feature `zeroize`, generic-array-0.14.7/src/lib.rs:90, dan yang aktif cuma
+// `more_lengths`), jadi `GenericArray::from_mut_slice` menyelesaikannya tanpa
+// feature baru — `sha2::digest::generic_array` hanya re-export, `Cargo.toml`
+// tidak berubah sama sekali.
