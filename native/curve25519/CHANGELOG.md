@@ -4,9 +4,9 @@ All notable changes to `oktz-curve25519`. This directory is vendored into the
 `Onigi` repository and has its own CI (`.github/workflows/ci.yml` and
 `release.yml`) and its own `napi.config.json`; the commits below are the real
 ones from `git log -- native/curve25519`, and the file lists are the real
-ones in this tree. The two hashless bullets in the `next` section below are
-the ones in the commit that writes this file: a commit cannot contain its own
-hash, so those two are identified by subject rather than by identifier.
+ones in this tree. The three hashless bullets in the `next` section below are
+the ones in the commits that write this file: a commit cannot contain its own
+hash, so those three are identified by subject rather than by identifier.
 
 The Rust crate's own version is `0.1.0` (`Cargo.toml`); the npm package's is
 `0.0.4`. They are independent.
@@ -92,12 +92,14 @@ below are commit hashes, not version numbers.
   observable behaviour change — the 48-signature explicit-`rnd` grid above was
   re-measured against a build of `0bd9500` and is byte-identical — and the note
   at `src/lib.rs:204` records what is deliberately *not* covered: dalek's
-  internal limb temporaries, the unwiped `h·a` product, the caller-owned
-  `Uint8Array`, and the one residue that is actual secret bytes —
-  `Scalar::from_bytes_mod_order` takes its 32 bytes by value, so the deref at
-  `src/lib.rs:98` materialises an unwiped `[u8; 32]` of the clamped secret for
-  the duration of that call. dalek offers no `&[u8; 32]` constructor, so that
-  one is disclosed rather than fixed.
+  internal limb temporaries, the unwiped `h·a` product, and the caller-owned
+  `Uint8Array`. Two residues that note records are actual secret bytes, and
+  neither can be closed from this crate: `Scalar::from_bytes_mod_order` takes its 32
+  bytes by value, so the deref at `src/lib.rs:98` materialises an unwiped
+  `[u8; 32]` of the clamped secret for the duration of that call (dalek offers
+  no `&[u8; 32]` constructor), and the `Sha512` state in `nonce_rnd` absorbs `sk`
+  at `src/lib.rs:59` and is dropped unwiped, because sha2 0.10.9 implements
+  neither `Drop` nor `Zeroize` anywhere.
 - **Documentation corrected to match.** The README still described
   `sign()` as deterministic, `verify()` as cofactorless, "no test in this
   repository distinguishes the two behaviours", and the nonce mitigation as a
@@ -110,6 +112,31 @@ below are commit hashes, not version numbers.
   repository — now says so rather than leaving the line number looking
   verifiable here, and `examples/verify_debug.rs` calls `verify_strict` rather
   than the cofactorless `Verifier::verify`.
+- **Three more secret-equivalent buffers are now zeroized, and the note's scope
+  was wrong.** The criterion the previous entry used — "derived from the secret"
+  — is weaker than the one that matters: a buffer is secret-equivalent if
+  whoever holds it can recover `a` from the public `S = r + h·a`, given
+  `r = SHA512(...) mod L`. Three buffers passed the weaker test and were
+  therefore missed: the `SHA512` digest in `nonce_rnd` (`src/lib.rs:62`), the
+  CSPRNG nonce `generated` (`src/lib.rs:108`), and the caller-supplied
+  `opt_random` nonce `rnd` (`src/lib.rs:154`). Each is a preimage of `r`, so
+  each is as sensitive as `a`, and the note's own claim that `generated` was
+  "not secret" was wrong for exactly that reason. All three are now in
+  `Zeroizing`; `digest` in `challenge` (`src/lib.rs:78`) is wrapped too, though
+  every input to it is public, so that the rule has no exceptions to remember.
+  This is a fix in code, not another disclosure: `from_bytes_mod_order_wide`
+  takes `&[u8; 64]`, so wrapping the digest costs nothing and the residue is
+  gone. `rnd` is caller-supplied, but so is `sk` at `src/lib.rs:159` and that was
+  already wrapped, so treating them differently would have been the
+  inconsistency. Two further corrections fall out of the same finding. The
+  note's "inside dalek" wording stopped one crate short: the `Sha512` state is
+  the second secret-bearing buffer this crate cannot reach, and it is in sha2,
+  so the sentence now covers both dependencies. And the two superlatives that
+  called the by-value argument slot *the* one secret-bytes residue have been
+  retracted — there are two, and `src/lib.rs` and `README.md` now say so. Still
+  no behaviour change: the 48-signature explicit-`rnd` grid re-measured against
+  a build of `69df139` is byte-identical, `npm test` is 12, and `docs:verify` is
+  20 blocks + 4 examples with 0 failures.
 
 ---
 

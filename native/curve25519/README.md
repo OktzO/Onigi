@@ -291,34 +291,42 @@ to the key it claims to. It is **not**:
 
 Verified by reading `src/lib.rs` and by running it:
 
-- **Secret keys are zeroized, in both representations.** The clamped 32-byte
-  secret is held in a `zeroize::Zeroizing` buffer (`src/lib.rs:94`,
-  `src/lib.rs:159`), and so is every `Scalar` the signing path materialises —
+- **Secret keys are zeroized, in every representation the signing path
+  materialises.** The clamped 32-byte secret is held in a `zeroize::Zeroizing`
+  buffer (`src/lib.rs:94`, `src/lib.rs:159`), and so is each `Scalar` —
   `a`, `r`, `h` and `s` in `sign_internal` (`src/lib.rs:98`, `src/lib.rs:113`,
-  `src/lib.rs:122`, `src/lib.rs:127`). The wrap is the substance here, not the
-  style: `curve25519-dalek`'s `Scalar` has a manual `Zeroize` impl and **no
-  `Drop`**, so the `zeroize` feature makes `scalar.zeroize()` callable without
-  making a `Scalar` wipe itself — the arithmetic form of the key would
-  otherwise sit in freed stack memory for the life of the process.
+  `src/lib.rs:122`, `src/lib.rs:127`) — together with three buffers that are
+  secret-equivalent to `a`: the `SHA512` digest in `nonce_rnd`
+  (`src/lib.rs:62`), the CSPRNG nonce `generated` (`src/lib.rs:108`), and the
+  caller-supplied `opt_random` nonce `rnd` (`src/lib.rs:154`). Each is a
+  preimage of `r`, and from the public `S` and `h` that gives
+  `a = (S − r)·h⁻¹`. The wrap is the substance here, not the style:
+  `curve25519-dalek`'s `Scalar` has a manual `Zeroize` impl and **no `Drop`**, so
+  the `zeroize` feature makes `scalar.zeroize()` callable without making a
+  `Scalar` wipe itself — the arithmetic form of the key would otherwise sit in
+  freed stack memory for the life of the process.
   Wrapping makes the wipe unconditional on every exit path, including the
   error return when the CSPRNG cannot be read. Two honest limits, both
   recorded at `src/lib.rs:249`: `&*h * &*a` still materialises the product as
   an unwiped `Scalar` temporary, because that is the `Mul` impl's return value
   — harmless here, since `h` is public and `a` is not recoverable from `h·a`
-  without already holding `a`; and `Zeroizing<Scalar>` bounds the canonical
-  32-byte form, not `curve25519-dalek`'s internal limb temporaries, which that
-  crate does not wipe either. Separately, of the four only `a` and `r` are
-  secret — `h` is `SHA512(R ‖ A ‖ m)` over public values and `S` is published in
-  the signature itself, so those two are wrapped for uniformity rather than
-  necessity.
+  without already holding `a`; and `Zeroizing` bounds this crate's own buffers,
+  not the ones inside its dependencies — `curve25519-dalek`'s `UnpackedScalar`
+  limb temporaries, and the `Sha512` state that `nonce_rnd` feeds the secret key
+  into at `src/lib.rs:59`, which sha2 0.10.9 drops unwiped (it has neither
+  `Drop` nor `Zeroize` anywhere). Separately, of the four scalars only `a` and
+  `r` are secret — `h` is `SHA512(R ‖ A ‖ m)` over public values and `S` is
+  published in the signature itself, so those two are wrapped for uniformity
+  rather than necessity.
   `curve25519-dalek` and `ed25519-dalek` are both pulled in with the `zeroize`
   feature (`Cargo.toml`). The *unclamped* input `Uint8Array` is not zeroized —
-  it belongs to the caller. One copy of the *clamped* secret does escape:
+  it belongs to the caller. Two copies of the *clamped* secret still sit
+  outside any guard, and neither can be closed from here:
   `Scalar::from_bytes_mod_order` takes its 32 bytes **by value**, so the deref
   at `src/lib.rs:98` materialises an unwiped `[u8; 32]` for the duration of that
-  call. dalek has no `&[u8; 32]`-taking constructor and no restructuring here
-  avoids the by-value call, so that residue is disclosed rather than fixed —
-  it is the only one on the list that is actual secret bytes.
+  call (dalek has no `&[u8; 32]`-taking constructor), and the `Sha512` state
+  above holds `sk` until the hasher is dropped unwiped. Both are recorded at
+  `src/lib.rs:283` as open, not as fixed.
 - **No `unsafe` in the Rust.** `#![deny(unsafe_code)]` is the first line of
   `src/lib.rs`. Verification is delegated to `ed25519-dalek` rather than
   hand-rolled (`src/lib.rs:170-172` says why).

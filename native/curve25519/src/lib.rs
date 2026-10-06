@@ -59,7 +59,7 @@ fn nonce_rnd(sk: &[u8; 32], msg: &[u8], rnd: &[u8]) -> Scalar {
     h.update(sk);
     h.update(msg);
     h.update(rnd);
-    let digest: [u8; 64] = h.finalize().into();
+    let digest = Zeroizing::new(h.finalize().into());
     Scalar::from_bytes_mod_order_wide(&digest)
 }
 
@@ -75,7 +75,7 @@ fn challenge(r: &[u8; 32], a: &[u8; 32], msg: &[u8]) -> Scalar {
     h.update(r);
     h.update(a);
     h.update(msg);
-    let digest: [u8; 64] = h.finalize().into();
+    let digest = Zeroizing::new(h.finalize().into());
     Scalar::from_bytes_mod_order_wide(&digest)
 }
 
@@ -105,14 +105,14 @@ fn sign_internal(
     // (hidden-number-problem lattice attack). rnd stays injectable so the
     // parity oracle and known-answer vectors can still pin a fixed nonce, as
     // oktz-signal's curveSign does (that crate's source is not vendored here).
-    let mut generated = [0u8; 64];
+    let mut generated = Zeroizing::new([0u8; 64]);
     if rnd.is_none() {
-        getrandom::getrandom(&mut generated)
+        getrandom::getrandom(&mut generated[..])
             .map_err(|_| "no CSPRNG available for the XEdDSA nonce".to_string())?;
     }
     let r = Zeroizing::new(match rnd {
         Some(rnd) => nonce_rnd(&sk, msg, rnd),
-        None => nonce_rnd(&sk, msg, &generated),
+        None => nonce_rnd(&sk, msg, &generated[..]),
     });
 
     // R = r*B, packed
@@ -151,10 +151,10 @@ fn pubkey_montgomery_to_edwards(pk: &[u8; 32], sign_bit: u8) -> Option<EdwardsPo
 #[napi]
 pub fn sign(secret_key: Uint8Array, msg: Uint8Array, opt_random: Option<Uint8Array>) -> Result<Buffer> {
     check_len(&secret_key, 32, "secret key")?;
-    let mut rnd: Option<[u8; 64]> = None;
+    let mut rnd: Zeroizing<Option<[u8; 64]>> = Zeroizing::new(None);
     if let Some(r) = opt_random {
         check_len(&r, 64, "random data")?;
-        rnd = Some(r[..64].try_into().unwrap());
+        *rnd = Some(r[..64].try_into().unwrap());
     }
     let sk = Zeroizing::new(<[u8; 32]>::try_from(&secret_key[..32]).unwrap());
     let sig = sign_internal(&sk, &msg, rnd.as_ref()).map_err(napi::Error::from_reason)?;
@@ -205,21 +205,21 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 //
 // Dua lapis yang berbeda, dan hanya yang pertama yang otomatis:
 //
-// 1. `sk` — byte secret yang sudah di-clamp, 32 byte — di `Zeroizing<[u8; 32]>`
-//    (baris 94 dan 159). Wipe-nya benar-benar otomatis: `Zeroizing` punya
-//    `Drop` (zeroize-1.9.0/src/lib.rs:696) yang memanggil `Z::zeroize`.
-// 2. `a`, `r`, `h`, `s` — representasi aritmetika. `curve25519_dalek::Scalar`
-//    (curve25519-dalek-4.1.3/src/scalar.rs:195) hanya `#[derive(Copy, Clone,
-//    Hash)]`; `impl Zeroize for Scalar` ada di baris 556 dan TIDAK ada
-//    `impl Drop`. Fitur `zeroize` di Cargo.toml membuat `scalar.zeroize()` bisa
-//    dipanggil, tidak membuat `Scalar` menghapus dirinya sendiri.
+// 1. Byte buffer di `Zeroizing`: `sk` (94, 159), `digest` di kedua fungsi
+//    SHA-512 (62, 78), `generated` (108), `rnd` (154). Wipe-nya otomatis lewat
+//    `Drop` (zeroize-1.9.0/src/lib.rs:696) → `Z::zeroize`.
+// 2. `Scalar` — representasi aritmetika — juga di `Zeroizing`. TAPI
+//    `curve25519_dalek::Scalar` (curve25519-dalek-4.1.3/src/scalar.rs:195)
+//    hanya `#[derive(Copy, Clone, Hash)]`; `impl Zeroize for Scalar` ada di
+//    baris 556 dan TIDAK ada `impl Drop`. Fitur `zeroize` di Cargo.toml membuat
+//    `scalar.zeroize()` bisa dipanggil tanpa membuat `Scalar` hapus dirinya.
 //
-// Yang secret-derived adalah `a` dan `r`. `h` dan `s` juga dibungkus, meski
-// keduanya bukan rahasia: `h = SHA512(R ‖ A ‖ m)`, dan R serta A sudah keluar ke
-// caller (A sebagai public key, R sebagai paruh signature) sementara `m` adalah
-// data pemanggil — jadi `h` publik, begitu juga `S` karena ada di signature.
-// Biayanya 32 byte stack dan satu wipe masing-masing, dan aturan "dibungkus,
-// bukan `.zeroize()` manual" jadi jelas untuk turunan berikutnya.
+// Yang secret-derived: `a`, `r`, `digest` di `nonce_rnd` (62), `generated` (108)
+// dan `rnd` (154). Tiga yang terakhir semuanya preimage `r` atau lebih dekat ke
+// sana — dari `S` dan `h` yang publik orang bisa ambil `a = (S − r)·h⁻¹` — jadi
+// secret-equivalent dengan `a`, bukan hanya "bukan turunan secret" seperti klaim
+// lama soal `generated`. `h`, `s`, dan `digest` di `challenge` (78) ikut
+// dibungkus demi aturan seragam; inputnya publik semua, daftarnya ada di bawah.
 //
 // Dibungkus, bukan diberi `.zeroize()` di titik-titik pilihan: pembungkus
 // membuat wipe terjadi di SETIEMAP jalur keluar — termasuk `?` CSPRNG di
@@ -253,24 +253,42 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 //   tanpa memanggil `.zeroize()` manual pada hasilnya. Tidak masalah: `h`
 //   publik, jadi yang tertinggal adalah `h·a`, dan `a` tidak dapat diambil dari
 //   `h·a` tanpa sudah memegang `a`. Yang berbahaya adalah salinan `a`/`r`.
-// - Di dalam dalek, `Scalar::unpack()` (scalar.rs:1119) dan operasi limbanya
-//   membuat `UnpackedScalar` sementara yang dalek sendiri tidak zeroize (yang
-//   di-wipe hanya scratch `batch_invert`, scalar.rs:834). `Zeroizing<Scalar>`
-//   menjaga representasi kanonik 32 byte; ia tidak bisa menjangkau ke dalam
-//   dalek. Jadi ini membatasi residue, bukan menjamin "tidak ada sisa".
+// - Yang menyerap byte secret lalu dibuang tanpa wipe ada di dalam DEPENDENCY,
+//   di dua tempat, dan `Zeroizing` crate ini tidak bisa menjangkau keduanya:
+//   - dalek: `Scalar::unpack()` (scalar.rs:1119) dan operasi limbanya membuat
+//     `UnpackedScalar` sementara yang dalek sendiri tidak zeroize (yang di-wipe
+//     hanya scratch `batch_invert`, scalar.rs:834). Isinya limb `a` dan `r`.
+//   - sha2 0.10.9: state `Sha512` di `nonce_rnd` (baris 56-61) menyerap `sk`
+//     lewat `h.update(sk)` di baris 59. sha2 tidak punya satu pun `impl Drop`
+//     atau `impl Zeroize` di seluruh source-nya, jadi block buffer yang memuat
+//     `sk` itu tetap ada di stack setelah fungsi selesai. Menghapusnya berarti
+//     mengganti hasher, bukan mengedit baris di sini.
+//   `Zeroizing<Scalar>` menjaga representasi kanonik 32 byte saja. Jadi ini
+//   membatasi residue, bukan menjamin "tidak ada sisa".
 //
-// Yang TIDAK dibungkus: `generated` (64 byte dari CSPRNG, bukan turunan
-// secret — tidak rahasia), `a_bytes`/`r_bytes` (koordinat publik), dan
-// `Uint8Array` milik pemanggil, yang tidak boleh disentuh crate ini sama
-// sekali. `s_bytes` juga tidak, tapi itu karena `S` keluar ke caller sebagai
-// signature, bukan karena wipe-nya di-lewatkan.
+// Yang TIDAK dibungkus: `a_bytes`/`r_bytes` (koordinat publik — A sudah keluar
+// sebagai public key, R sebagai paruh signature), `Uint8Array` milik pemanggil
+// (`secret_key` dan `opt_random`), yang tidak boleh disentuh crate ini sama
+// sekali, dan `s_bytes` — bukan karena wipe-nya di-lewatkan, tapi karena `S`
+// keluar ke caller sebagai signature.
 //
-// Dan satu residue yang benar-benar byte secret, bukan turunan publik:
-// `Scalar::from_bytes_mod_order` menerima 32 byte itu BY VALUE
-// (curve25519-dalek-4.1.3/src/scalar.rs:237), jadi `*sk` di baris 98 — yang
-// hasil deref dari `Zeroizing<[u8; 32]>` — mematerialisasi salinan `[u8; 32]`
-// dari secret yang sudah di-clamp ke dalam slot argumennya, dan tidak ada yang
-// meng-wipe-nya selama panggilan itu berjalan. dalek tidak punya konstruktor
-// yang menerima `&[u8; 32]`, dan tidak ada penataan ulang di file ini yang
-// menghindari panggilan by-value tersebut, jadi residue ini dicatat, bukan
-// diperbaiki.
+// Kriteria yang dipakai, supaya aturan ini bisa diterapkan tanpa tebakan: sebuah
+// buffer dianggap secret-equivalent kalau siapa pun yang memegangnya bisa mendapat
+// `a` dari `S = r + h·a` yang publik, dengan `r = SHA512(...) mod L`. Buffer
+// seperti itu dibungkus. Yang publik secara konstruksi atau milik pemanggil
+// enumerable di atas. "Bukan turunan secret" BELUM tentu lolos: `digest` baris
+// 62, `generated` baris 108, dan `rnd` baris 154 tidak satu pun diturunkan dari
+// `sk`, dan ketiganya tetap dibungkus justru karena semuanya preimage `r`.
+//
+// Yang benar-benar secret dan TIDAK bisa dihindari dari sini: DUA.
+// 1. `Scalar::from_bytes_mod_order` menerima 32 byte itu BY VALUE
+//    (curve25519-dalek-4.1.3/src/scalar.rs:237), jadi `*sk` di baris 98 — hasil
+//    deref dari `Zeroizing<[u8; 32]>` — mematerialisasi salinan `[u8; 32]` dari
+//    secret yang sudah di-clamp ke dalam slot argumennya, dan tidak ada yang
+//    meng-wipe-nya selama panggilan itu berjalan. dalek tidak punya konstruktor
+//    yang menerima `&[u8; 32]`, dan tidak ada penataan ulang di file ini yang
+//    menghindari panggilan by-value tersebut.
+// 2. State `Sha512` di dalam sha2, sudah disebut di batasannya di atas: ia
+//    menyerap `sk` dan sha2 tidak menyediakan wipe.
+// Dua-duanya di luar jangkauan `Zeroizing` crate ini. Dicatat, bukan diklaim
+// hilang.
