@@ -4,9 +4,9 @@ All notable changes to `oktz-curve25519`. This directory is vendored into the
 `Onigi` repository and has its own CI (`.github/workflows/ci.yml` and
 `release.yml`) and its own `napi.config.json`; the commits below are the real
 ones from `git log -- native/curve25519`, and the file lists are the real
-ones in this tree. The three hashless bullets in the `next` section below are
+ones in this tree. The four hashless bullets in the `next` section below are
 the ones in the commits that write this file: a commit cannot contain its own
-hash, so those three are identified by subject rather than by identifier.
+hash, so those four are identified by subject rather than by identifier.
 
 The Rust crate's own version is `0.1.0` (`Cargo.toml`); the npm package's is
 `0.0.4`. They are independent.
@@ -134,9 +134,63 @@ below are commit hashes, not version numbers.
   so the sentence now covers both dependencies. And the two superlatives that
   called the by-value argument slot *the* one secret-bytes residue have been
   retracted — there are two, and `src/lib.rs` and `README.md` now say so. Still
-  no behaviour change: the 48-signature explicit-`rnd` grid re-measured against
-  a build of `69df139` is byte-identical, `npm test` is 12, and `docs:verify` is
-  20 blocks + 4 examples with 0 failures.
+no behaviour change: the 48-signature explicit-`rnd` grid re-measured against
+   a build of `69df139` is byte-identical, `npm test` is 12, and `docs:verify` is
+   20 blocks + 4 examples with 0 failures.
+- **`clamp_scalar` no longer copies the secret at all, and the criterion that let
+  that through now asks a second question.** `clamp_scalar` took `&[u8; 32]` and
+  returned `[u8; 32]`, so `src/lib.rs` did two by-value copies of the key on every
+  call: `let mut a = *sk;` put the **unclamped** key into a local no `Zeroizing`
+  covered, and returning `a` copied it out again into the caller's guard.
+  `clamp_scalar` now takes `&mut Zeroizing<[u8; 32]>` and clamps in place;
+  `sign_internal` takes that buffer by `&mut` (`src/lib.rs:89`) and `sign` creates
+  it at `src/lib.rs:159`. The 32-byte secret now enters this crate exactly once,
+  into a guard, and is never copied again. That is a fix in code, not a fourth
+  disclosure — the previous entry's *"Yang benar-benar secret dan TIDAK bisa
+  dihindari dari sini: DUA"* stays two, and `clamp_scalar` is no longer one of
+  them. The criterion in `src/lib.rs` was rewritten to be two mandatory
+  questions rather than one. The first is unchanged: is the buffer
+  secret-equivalent, i.e. would whoever holds it be able to recover `a` from the
+  public `S`? The second is new, and it is the one that was missing: **every
+  by-value argument and every by-value return on the signing path is a copy of
+  secret material into memory this crate does not wipe, whatever its type**, so
+  it counts the same as a buffer. That is not a derivation question, which is
+  exactly why the first test could not see `clamp_scalar`: it would have passed
+  it silently. Three shapes are now called out by name, because each has to be
+  looked for separately — (a) a `let` that initialises an unguarded local from
+  guarded material, plus the by-value return that reads it; (b) a by-value
+  argument forced by a dependency, whose copy lands in the callee's frame where
+  no guard here can reach it; (c) a by-value temporary born of a by-value return
+  and then read by something else.
+  Re-running the extended criterion over the whole signing path found one residue
+  that no list had, and it is now named rather than missed: the
+  `GenericArray<u8, U64>` temporary that `h.finalize().into()` creates at
+  `src/lib.rs:62` — `FixedOutput::finalize_fixed` allocates `out` and returns it
+  by value, so the digest (a preimage of `r`, i.e. secret-equivalent) exists in
+  an unwiped slot before `.into()` puts it in the guard. Its twin at
+  `src/lib.rs:78` is the same code over public inputs. The note also records two
+  things that a re-run has to check rather than assume: `finalize_fixed_reset`
+  does **not** close the sha2 residue, because `digest_pad`
+  (`block-buffer-0.10.4/src/lib.rs:290`) only zeroes bytes *after* the block
+  position and `BlockBuffer::reset` (line 180) only rewinds that position, so the
+  raw `sk` bytes are still in the block buffer when the hasher is dropped; and
+  `Zeroizing` cannot wrap a `GenericArray` here, because `generic-array`'s
+  `zeroize` feature is not enabled. Four things the same sweep cleared, all of
+  which had to be cleared rather than assumed: the temporaries inside
+  `base_mult_scalar` (`p`, `CompressedEdwardsY`) are `a·B` and `A`, both public;
+  napi 3.12.2 borrows the caller's `Uint8Array` through
+  `napi_get_typedarray_info`, so this crate never copies the caller's bytes at
+  all; `verify` holds no secret buffer, because everything it takes is already
+  public; and the clamping is applied, not skipped — 24 key pairs differing only
+  in the clamped bits produce identical signatures, and the three golden vectors
+  in `tests/nonce-randomness.test.cjs` (whose keys clamp three different ways)
+  still pass. No behaviour change: 848 explicit-`rnd` signatures are byte-identical
+  to `7714bf8` — the 48-signature grid above, a 768-signature grid over 32
+  arbitrary mostly-unclamped keys × 3 nonces × 8 messages, and 32 signatures over
+  deliberately dirty clamp bits compared against `oktz-signal`'s independent
+  native `curveSign` — plus 96 cross-implementation verify checks, both
+  low-order-forgery probes still rejected, and identical error messages.
+  `npm test` is 12 and `docs:verify` is 20 blocks + 4 examples with 0 failures.
 
 ---
 

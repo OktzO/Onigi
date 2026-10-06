@@ -50,7 +50,7 @@ Returns a `Uint8Array` of 64 bytes, `R ‖ S`. Throws `Error: wrong secret key
 length`, `Error: wrong random data length`, or
 `TypeError: unexpected type, use Uint8Array`.
 
-**The secret key is clamped inside the addon** (`src/lib.rs:46-52`, RFC 7748:
+**The secret key is clamped inside the addon** (`src/lib.rs:44-52`, RFC 7748:
 `sk[0] &= 248; sk[31] &= 127; sk[31] |= 64`). You do not clamp it yourself,
 and you cannot observe the clamped value. Note the consequence: two different
 32-byte secrets that differ only in the clamped bits produce the **same**

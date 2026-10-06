@@ -292,11 +292,13 @@ to the key it claims to. It is **not**:
 Verified by reading `src/lib.rs` and by running it:
 
 - **Secret keys are zeroized, in every representation the signing path
-  materialises.** The clamped 32-byte secret is held in a `zeroize::Zeroizing`
-  buffer (`src/lib.rs:94`, `src/lib.rs:159`), and so is each `Scalar` —
-  `a`, `r`, `h` and `s` in `sign_internal` (`src/lib.rs:98`, `src/lib.rs:113`,
-  `src/lib.rs:122`, `src/lib.rs:127`) — together with three buffers that are
-  secret-equivalent to `a`: the `SHA512` digest in `nonce_rnd`
+  materialises.** The 32-byte secret enters this crate exactly once, into a
+  `zeroize::Zeroizing` buffer at `src/lib.rs:159`, and is clamped **in place** at
+  `src/lib.rs:94` — `clamp_scalar` takes `&mut Zeroizing<[u8; 32]>`, so the
+  unclamped copy is never materialised anywhere else. Each `Scalar` is wrapped
+  too — `a`, `r`, `h` and `s` in `sign_internal` (`src/lib.rs:98`,
+  `src/lib.rs:113`, `src/lib.rs:122`, `src/lib.rs:127`) — together with three
+  buffers that are secret-equivalent to `a`: the `SHA512` digest in `nonce_rnd`
   (`src/lib.rs:62`), the CSPRNG nonce `generated` (`src/lib.rs:108`), and the
   caller-supplied `opt_random` nonce `rnd` (`src/lib.rs:154`). Each is a
   preimage of `r`, and from the public `S` and `h` that gives
@@ -312,21 +314,37 @@ Verified by reading `src/lib.rs` and by running it:
   — harmless here, since `h` is public and `a` is not recoverable from `h·a`
   without already holding `a`; and `Zeroizing` bounds this crate's own buffers,
   not the ones inside its dependencies — `curve25519-dalek`'s `UnpackedScalar`
-  limb temporaries, and the `Sha512` state that `nonce_rnd` feeds the secret key
-  into at `src/lib.rs:59`, which sha2 0.10.9 drops unwiped (it has neither
-  `Drop` nor `Zeroize` anywhere). Separately, of the four scalars only `a` and
-  `r` are secret — `h` is `SHA512(R ‖ A ‖ m)` over public values and `S` is
+  limb temporaries, and in sha2 0.10.9 both the `Sha512` state that `nonce_rnd`
+  feeds the secret key into at `src/lib.rs:59` (sha2 has neither `Drop` nor
+  `Zeroize` anywhere, and `finalize_fixed_reset` does not help: `digest_pad`
+  only zeroes bytes *after* the block position, and `BlockBuffer::reset` only
+  rewinds the position) and the temporaries sha2's finalisation allocates
+  before the digest reaches the guard. Separately, of the four scalars only `a`
+  and `r` are secret — `h` is `SHA512(R ‖ A ‖ m)` over public values and `S` is
   published in the signature itself, so those two are wrapped for uniformity
   rather than necessity.
   `curve25519-dalek` and `ed25519-dalek` are both pulled in with the `zeroize`
-  feature (`Cargo.toml`). The *unclamped* input `Uint8Array` is not zeroized —
-  it belongs to the caller. Two copies of the *clamped* secret still sit
-  outside any guard, and neither can be closed from here:
-  `Scalar::from_bytes_mod_order` takes its 32 bytes **by value**, so the deref
+  feature (`Cargo.toml`). Two questions decide the rule, and a buffer has to
+  pass both: **is it secret-equivalent** — would whoever holds it be able to
+  recover `a` from the public `S`? "Not derived from the secret" does not
+  clear it, which is why the digest and both nonces are wrapped — **and does
+  anything copy it by value**, since every by-value argument and every by-value
+  return on the signing path is a copy of secret material into memory this crate
+  does not wipe, whatever its type. The second question is the one that a
+  derivation test cannot see at all: `clamp_scalar` used to initialise an
+  unwiped local from the guarded key and return it by value, which put an
+  *unclamped* copy of the secret on the stack twice, and no amount of
+  derivation reasoning would have flagged it.
+  The caller's `Uint8Array` inputs are the caller's to zeroize, not ours, and
+  they are not zeroized here — napi hands them over as borrowed `&[u8]` views
+  onto JS memory (`napi_get_typedarray_info`), so nothing in this crate copies
+  them either. What is left outside any guard is on our side of the boundary,
+  and it is not the caller's bytes:
+  `Scalar::from_bytes_mod_order` takes its 32 bytes **by value**, so the `**sk`
   at `src/lib.rs:98` materialises an unwiped `[u8; 32]` for the duration of that
-  call (dalek has no `&[u8; 32]`-taking constructor), and the `Sha512` state
-  above holds `sk` until the hasher is dropped unwiped. Both are recorded at
-  `src/lib.rs:283` as open, not as fixed.
+  call (dalek has no `&[u8; 32]`-taking constructor), and the `Sha512` buffers
+  above hold `sk`, or a preimage of `r`, until they are dropped unwiped. Both are
+  recorded at `src/lib.rs:331` as open, not as fixed.
 - **No `unsafe` in the Rust.** `#![deny(unsafe_code)]` is the first line of
   `src/lib.rs`. Verification is delegated to `ed25519-dalek` rather than
   hand-rolled (`src/lib.rs:170-172` says why).
