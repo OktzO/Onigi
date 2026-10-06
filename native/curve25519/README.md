@@ -394,10 +394,12 @@ Verified by reading `src/lib.rs` and by running it:
   hand-rolled (`src/lib.rs:175-177` says why).
 - **`verify()` uses the strict equation.** `src/lib.rs:206` calls
   `vk.verify_strict(...)`, not the cofactorless `vk.verify(...)`. That is not a
-  stylistic choice: the cofactorless equation accepts a forged signature
-  whenever the public key is a small-order point, because `u = 0` maps to the
-  Edwards order-2 point, where `R = A, S = 0` satisfies the equation for every
-  message and every key.
+  stylistic choice: the cofactorless equation accepts a forgery under any
+  small-order public key. For `u = 0`, the Edwards order-2 point `A`, the fixed
+  pair `R = A, S = 0` satisfies it for about **half** of messages — `k` has to be
+  odd, since that `A` is its own inverse — not for every message. No key
+  material is involved: the attacker picks the message and retries until one
+  lands.
   `tests/loworder-forgery.test.cjs` asserts that this package returns `false`
   for exactly that forgery, and `examples/02-rejection.mjs` prints it as part of
   the measured rejection surface. `oktz-signal` was already strict
@@ -498,9 +500,12 @@ and `examples/02-rejection.mjs`, both executed by `npm run docs:verify`.
 One of those rejections is about the **key** rather than the signature, and it
 is measured in the same example rather than asserted in prose: an all-zero
 public key with `R = A, S = 0` returns `false`, under three different messages.
-The cofactorless equation this package used to verify with returns `true` for
-that forgery for every key and every message, so this is the case where
-"it returns false" is the security property rather than a convenience.
+The cofactorless equation this package used to verify with returned `true` for
+that forgery on about half of all messages, and for about three quarters of them
+if `R` is allowed to range over all eight low-order points. The point is not that
+the forgery always works: it is that nothing secret is needed to get a signature
+accepted, so here "it returns false" is the security property rather than a
+convenience.
 
 ---
 

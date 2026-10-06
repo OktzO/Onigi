@@ -25,12 +25,15 @@ below are commit hashes, not version numbers.
 
 - **`fcf1cf9` — `fix(curve): verify XEdDSA with verify_strict, not the
   cofactorless equation`.** `verify` called `ed25519-dalek`'s cofactorless
-  `vk.verify`. That equation accepts a forged signature whenever the public key
-  is a small-order point: `u = 0` converts through `MontgomeryPoint::to_edwards`
-  to the Edwards order-2 point `(0, -1)`, for which `R = A, S = 0` satisfies
-  `[S]B = R + [k]A` for **every** message and **every** key. So a caller that
-  was handed a bogus 32-byte "public key" got `true` back for a signature
-  nobody signed. `verify` now calls `vk.verify_strict`
+  `vk.verify`. That equation accepts a forgery whenever the public key is a
+  small-order point: `u = 0` converts through `MontgomeryPoint::to_edwards` to
+  the Edwards order-2 point `(0, -1)`, and there `R = A, S = 0` satisfies
+  `[S]B = R + [k]A` for about **half** of messages, not for every message: `k`
+  has to be odd, because that `A` is its own inverse. Letting `R` range over all
+  eight low-order points still covers only about three quarters of messages. No
+  secret is needed for any of it: a caller handed a bogus 32-byte "public key"
+  could get `true` back for a signature nobody signed, by choosing a message and
+  retrying until one lands. `verify` now calls `vk.verify_strict`
   (`src/lib.rs:206`), which rejects a small-order `R` and a weak `A`.
   `oktz-signal` has been strict at the same point all along
   (`native/signal/src/curve.rs:175-178`, in that crate's checkout, which this

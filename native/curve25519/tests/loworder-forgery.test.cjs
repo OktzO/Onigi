@@ -9,7 +9,14 @@ const native = require('../index.cjs');
 
 // u = 0 maps through MontgomeryPoint::to_edwards to the Edwards point of
 // order 2, (0, -1). For that A the cofactorless equation [S]B = R + [k]A is
-// satisfied by R = A, S = 0, for EVERY message and EVERY key.
+// satisfied by R = A, S = 0 for about half of messages, not every message: k
+// has to be odd, because that A is its own inverse. No key material is needed —
+// the attacker picks the message and retries until one lands.
+//
+// The four messages below span both parities of k on purpose: under the
+// cofactorless check that shipped before the fix, 'probe #0' and '' came back
+// true while 'probe #1' and 'probe #2' came back false, so this file fails
+// against that build rather than passing by luck.
 const ORDER_2_PUBKEY = Buffer.alloc(32, 0);
 const EDWARDS_ORDER_2 = Buffer.from(
   'ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f', 'hex');

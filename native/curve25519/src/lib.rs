@@ -198,11 +198,11 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
         Ok(v) => v,
         Err(_) => return Ok(false),
     };
-    // verify_strict, not verify: the cofactorless equation accepts a forged
-    // signature whenever the public key is a small-order point (u = 0 maps to
-    // the Edwards order-2 point, where R = A, S = 0 verifies for every message
-    // and every key). verify_strict rejects small-order R and weak A. oktz-signal
-    // already does this; the two implementations must stay byte-compatible.
+    // verify_strict, not verify: the cofactorless equation accepts a forgery under a small-order key —
+    // u = 0 maps to the order-2 point A, where R = A, S = 0 satisfies it for about HALF of all
+    // messages, NOT every one: k = H(R || A || m) mod L must be odd because A = -A, so an attacker
+    // holding only A retries chosen messages until one lands. verify_strict rejects a small-order R
+    // and a weak A; oktz-signal already does, and the two must stay byte-compatible.
     Ok(vk.verify_strict(&msg, &signature).is_ok())
 }
 
@@ -241,8 +241,8 @@ pub fn verify(public_key: Uint8Array, msg: Uint8Array, signature: Uint8Array) ->
 //    `let mut a = *sk;` di `clamp_scalar` lama persis begini, dan byte di local itu
 //    key yang BELUM di-clamp; (b) argumen by-value yang dipaksa dependency, yang
 //    salinannya mendarat di frame callee; (c) temporer by-value yang lahir dari
-//    return by-value lalu dibaca yang lain — `h.finalize().into()` di :66 dan :83 pada
-//    versi sebelumnya file ini, yang sudah hilang (lihat di bawah).
+//    return by-value lalu dibaca yang lain — `h.finalize().into()` di :66 pada versi ini sudah
+//    hilang; yang di :83 TETAP ADA dan itu bukan kebocoran — digest-nya atas input publik (:271).
 //
 // Lolos kalau salah satu: byte-nya publik atau milik pemanggil; ATAU rentang dari
 // sumber sampai guard-nya seluruhnya tertutup `Zeroizing`; ATAU salinannya tidak bisa

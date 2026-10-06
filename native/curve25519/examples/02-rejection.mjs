@@ -49,14 +49,24 @@ for (const [what, candidate] of cases) {
 }
 
 // A rejection about the KEY rather than the signature — the case the cofactorless
-// equation got wrong. u = 0 converts through
-// MontgomeryPoint::to_edwards to the Edwards order-2 point (0, -1), and for
-// that A the equation [S]B = R + [k]A is satisfied by R = A, S = 0 for EVERY
-// message and EVERY key — so this forgery verifies under a public key that
-// was never anybody's. verify() calls verify_strict (src/lib.rs:206), which
-// rejects a small-order R and a weak A; tests/loworder-forgery.test.cjs and
-// tests/platform-loader.test.cjs pin the same thing, the second one against
-// oktz-signal's native curveVerify as well.
+// equation got wrong. u = 0 converts through MontgomeryPoint::to_edwards to the
+// Edwards order-2 point (0, -1), and for that A the equation [S]B = R + [k]A is
+// satisfied by R = A, S = 0 for about HALF of messages, not for every message:
+// k has to be odd, because that A is its own inverse. Letting R range over all
+// eight low-order points with S = 0 still reaches only about three quarters of
+// them.
+//
+// What makes this a forgery rather than a curiosity is that no key material is
+// involved: the attacker chooses the message and retries until one lands, so a
+// signature nobody signed verifies under a public key that was never anybody's.
+// verify() calls verify_strict (src/lib.rs:206), which rejects a small-order R and
+// a weak A; tests/loworder-forgery.test.cjs and tests/platform-loader.test.cjs pin
+// the same thing, the second one against oktz-signal's native curveVerify as well.
+//
+// The three messages below deliberately span both parities of k — 'reject me'
+// and 'a different message' are ones the old cofactorless check already refused,
+// while the empty message is one it accepted — so this example measures the
+// rejection rather than resting on one lucky or unlucky draw.
 //
 // The 32 bytes of R below are the little-endian encoding of y = -1, derived
 // here rather than copied: (0 - 1) / (0 + 1) = -1 mod (2^255 - 19).

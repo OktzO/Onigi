@@ -93,8 +93,10 @@ test('this crate and oktz-signal agree on verify, including the low-order forger
   }
 
   // The forgery: an all-zero (Montgomery u = 0) public key converts to the
-  // Edwards order-2 point, for which R = A, S = 0 satisfies [S]B = R + [k]A
-  // for every message and every key. Both implementations must say false.
+  // Edwards order-2 point A, for which R = A, S = 0 satisfies [S]B = R + [k]A
+  // for about half of messages, not for every message — k has to be odd, since
+  // that A is its own inverse. No key material is needed to hit one, so both
+  // implementations must say false either way.
   const ORDER_2_PUBKEY = new Uint8Array(32);
   const FORGED = Buffer.concat([
     Buffer.from('ecffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f', 'hex'),
