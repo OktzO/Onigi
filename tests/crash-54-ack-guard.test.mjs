@@ -44,3 +44,42 @@ process.exit(0);
 	assert.match(stdout, /acked=1/, 'the ack failure must reach logger.error');
 	assert.match(stdout, /ctx=.*ack/);
 });
+
+/*
+ * Pre-login notification ack: a notification (e.g. companion_reg_refresh)
+ * arrives before creds.update sets authState.creds.me. The old
+ * `authState.creds.me.id` in sendMessageAck threw a TypeError, the .catch
+ * logged 'failed to ack notification', and no ack stanza was ever sent.
+ * Observable: no 'sent ack' debug entry and no TypeError error entry.
+ */
+test('a pre-login notification is acked without touching creds.me', async () => {
+	const { code, stdout, stderr } = await runScenario(`
+const myCreds = {
+	noiseKey: { private: Buffer.alloc(32), public: Buffer.alloc(32, 1) },
+	signedIdentityKey: { private: Buffer.alloc(32, 2), public: Buffer.alloc(32, 3) },
+	signedPreKey: { keyId: 1, public: Buffer.alloc(32, 4), private: Buffer.alloc(32, 5) },
+	advSecretKey: 'adv-secret', accountSyncCounter: 0, counter: 0,
+	me: undefined, registered: true, pairingCode: 'ABCDEFGH'
+};
+const myKeys = {
+	get: async () => undefined,
+	set: async () => {},
+	del: async () => {},
+	bind: async fn => fn({ get: async () => undefined, set: async () => {}, del: async () => {} })
+};
+const h = await startHarness({ config: { auth: { creds: myCreds, keys: myKeys } } });
+h.sock.ws.emit('CB:notification', { tag: 'notification', attrs: { id: 'N1', from: '12345:1@s.whatsapp.net', type: 'companion_reg_refresh' }, content: [] });
+await tick(400);
+const errs = h.logger.logs.filter(l => l[0] === 'error');
+const typeErr = errs.filter(l => String(l[1] && (l[1].ackErr || l[1].error || l[1].err || '')).includes('TypeError')).length;
+const sentAck = h.logger.logs.filter(l => l[2] === 'sent ack').length;
+console.log('errs=' + errs.length);
+console.log('typeErr=' + typeErr);
+console.log('sentAck=' + sentAck);
+process.exit(0);
+`);
+	assert.equal(code, 0, `child died: ${stderr}`);
+	assert.match(stdout, /typeErr=0/, `TypeError surfaced: ${stderr}`);
+	assert.match(stdout, /errs=0/, `an error was logged: ${stdout}`);
+	assert.match(stdout, /sentAck=1/, 'the ack path must complete');
+});
