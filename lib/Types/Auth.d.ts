@@ -99,6 +99,7 @@ export type SignalKeyStore = {
 };
 export type SignalKeyStoreWithTransaction = SignalKeyStore & {
     isInTransaction: () => boolean;
+    disposeTransactionStorage: () => void;
     transaction<T>(exec: () => Promise<T>, key: string): Promise<T>;
 };
 export type TransactionCapabilityOptions = {
