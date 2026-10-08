@@ -83,7 +83,18 @@ export type SocketConfig = {
     mediaCache?: CacheStore;
     /**
      * map to store the retry counts for failed messages;
-     * used to determine whether to retry a message or not */
+     * used to determine whether to retry a message or not
+     *
+     * A cache passed here is the caller's authority over inbound retry
+     * requests: unlike the library's own internal counter cache, which misses
+     * on first use and therefore reads a miss as "nothing charged yet", a miss
+     * here means "not permitted" and no retry request is sent. Omit a key to
+     * suppress the retry for that message.
+     *
+     * The resend budget for our own outgoing messages is a separate counter on
+     * the same cache and does not follow this rule: a miss there is zero
+     * resends spent, so the first retry is always allowed.
+     */
     msgRetryCounterCache?: CacheStore;
     /** provide a cache to store a user's device list */
     userDevicesCache?: PossiblyExtendedCacheStore;
