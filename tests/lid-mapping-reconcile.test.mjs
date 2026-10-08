@@ -31,12 +31,20 @@ const LID_1 = '777777:1@lid';
 const LID_2 = '888888:1@lid';
 /** whoever LID_2 is wrongly recorded against */
 const STALE_PN = '555555:1@s.whatsapp.net';
+/** a device-less LID: no device part at all, which is what most announcements carry */
+const LID_3 = '999999@lid';
+/** what getPNForLID hands back for LID_3 when the store holds the right pn *user*: the store
+ *  only ever keeps user<->user (lib/Signal/lid-mapping.js:30) and getPNForLID then splices the
+ *  *LID's* device onto that user (lid-mapping.js:229) -- with no LID device, no device comes back */
+const PN_NO_DEVICE = '628111@s.whatsapp.net';
 
 const one = async body => {
 	const prelude = `const logger = T.makeLogger();
 const PN = ${JSON.stringify(PEER_PN)};
 const LID_1 = ${JSON.stringify(LID_1)};
 const LID_2 = ${JSON.stringify(LID_2)};
+const LID_3 = ${JSON.stringify(LID_3)};
+const PN_NO_DEVICE = ${JSON.stringify(PN_NO_DEVICE)};
 const STALE_PN = ${JSON.stringify(STALE_PN)};
 /** a PN-addressed 1:1 stanza that announces lid as the sender's alt address */
 const announce = (id, lid) => {
@@ -94,4 +102,28 @@ assert.equal((await s.waitForXml("<receipt id='C2'")).length, 1, 'precondition: 
 assert.equal(pnFor(LID_2), PN);
 assert.deepEqual(stored, [{ lid: LID_2, pn: PN }], 'the pair is stored once, not once per inbound message');
 assert.deepEqual(migrated, [[PN, LID_2]], 'the session is migrated once, not once per inbound message');
+`));
+
+/*
+ * The mirror of the first test: a mapping that already names this pn user must be left
+ * alone. This is the branch a `!==` compare cannot get right, because the operand it is
+ * handed is not the stored value. getPNForLID never returns what the store holds -- the
+ * store only keeps user<->user (lid-mapping.js:30) -- it fabricates a jid by splicing the
+ * *LID's* device onto that stored pn user (lid-mapping.js:229). A device-less LID therefore
+ * comes back device-less, while `from` carries a device, so `existingPn !== primaryJid` is
+ * true for a perfectly good mapping. Nothing was corrupted (the store dedupes at
+ * lid-mapping.js:61-68 and migrateSession short-circuits through migratedSessionCache at
+ * libsignal.js:290), but every inbound message re-entered the lock and redid the work.
+ * Comparing the users is the comparison the caller actually means.
+ */
+test('a matching LID mapping is left alone, even when the devices differ', () => one(`
+const { signal, stored, migrated, pnFor } = lidSignal([[LID_3, PN_NO_DEVICE]]);
+assert.equal(pnFor(LID_3), PN_NO_DEVICE, 'precondition: LID_3 is recorded against this same pn user');
+
+const s = await bootSocket({ logger, signal });
+s.sock.ws.emit('CB:message', announce('M2', LID_3));
+assert.equal((await s.waitForXml("<receipt id='M2'")).length, 1, 'precondition: the message was handled');
+
+assert.deepEqual(stored, [], 'the mapping already names the same pn user, so nothing is rewritten');
+assert.deepEqual(migrated, [], 'and the session is not re-migrated on every inbound message');
 `));
