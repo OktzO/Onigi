@@ -4,6 +4,8 @@ import type { ILogger } from './logger.js';
 type ProcessMessageContext = {
     shouldProcessHistoryMsg: boolean;
     placeholderResendCache?: CacheStore;
+    /** opt-in idempotency cache: without it every message is processed (issue #2822) */
+    processedMessageCache?: CacheStore;
     creds: AuthenticationCreds;
     keyStore: SignalKeyStoreWithTransaction;
     ev: BaileysEventEmitter;
@@ -55,6 +57,15 @@ export declare function decryptPollVote({ encPayload, encIv }: proto.Message.IPo
  * @returns event response message
  */
 export declare function decryptEventResponse({ encPayload, encIv }: proto.Message.IPollEncValue, { eventCreatorJid, eventMsgId, eventEncKey, responderJid }: EventContext): proto.Message.EventResponseMessage;
-declare const processMessage: (message: WAMessage, { shouldProcessHistoryMsg, placeholderResendCache, ev, creds, signalRepository, keyStore, logger, options, getMessage }: ProcessMessageContext) => Promise<void>;
+/**
+ * Cache key identifying one delivery of one message, for the optional
+ * processed-message cache (issue #2822). It carries the chat (`key.remoteJid`),
+ * the id and a short hash of a re-encoded body, so a redelivery dedupes while a
+ * different message reusing the id still goes through.
+ *
+ * @returns the cache key, or `undefined` when there is no identity to dedupe on
+ */
+export declare const processedMessageKey: (message: WAMessage) => string | undefined;
+declare const processMessage: (message: WAMessage, { shouldProcessHistoryMsg, placeholderResendCache, processedMessageCache, ev, creds, signalRepository, keyStore, logger, options, getMessage }: ProcessMessageContext) => Promise<void>;
 export default processMessage;
 //# sourceMappingURL=process-message.d.ts.map

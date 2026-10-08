@@ -1,8 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { deflate } from 'node:zlib';
+import { promisify } from 'node:util';
 import NodeCache from '@cacheable/node-cache';
 import processMessage from '../lib/Utils/process-message.js';
+import { aesEncryptGCM, hmacSign } from '../lib/Utils/crypto.js';
+import { runScenario } from './helpers/ev-socket-harness.mjs';
 import { proto } from '../WAProto/index.js';
+
+const deflatePromise = promisify(deflate);
 
 /*
  * Issue #2822 ("Meta-AI self-chat messages keep getting redelivered").
@@ -102,6 +108,72 @@ const receiptStanza = (stanzaId) => ({
     }
 });
 
+/**
+ * Build the encrypted body of an event response, using the same derivation
+ * decryptEventResponse inverts (lib/Utils/process-message.js). Lets the test
+ * feed a response that really decrypts, so "the retry worked" is observable as
+ * a decrypted eventResponse rather than as an absence of log lines.
+ */
+const encryptEventResponse = (messageSecret, creationKey) => {
+    // participant-less creation key in a PN chat, and a responder in that same
+    // chat — both resolve to CHAT through getKeyAuthor
+    const eventMsgId = creationKey.id;
+    const jid = creationKey.remoteJid;
+    const iv = Buffer.alloc(12, 3);
+    const key0 = hmacSign(messageSecret, new Uint8Array(32), 'sha256');
+    const key = hmacSign(Buffer.concat([
+        Buffer.from(eventMsgId),
+        Buffer.from(jid),
+        Buffer.from(jid),
+        Buffer.from('Event Response'),
+        new Uint8Array([1])
+    ]), key0, 'sha256');
+    const plaintext = proto.Message.EventResponseMessage.encode(proto.Message.EventResponseMessage.fromObject({
+        response: proto.Message.EventResponseMessage.EventResponseType.GOING,
+        timestampMs: 1700000000000
+    })).finish();
+    return {
+        encIv: iv,
+        encPayload: aesEncryptGCM(plaintext, key, iv, Buffer.from(`${eventMsgId}\u0000${jid}`))
+    };
+};
+
+/**
+ * A history-sync stanza that needs no network to be processed: the chunk rides
+ * inline, deflated, so downloadAndProcessHistorySyncNotification takes the
+ * local decode path instead of downloading it.
+ */
+const historySyncStanza = async stanzaId => {
+    const chunk = proto.HistorySync.encode(proto.HistorySync.fromObject({
+        syncType: proto.HistorySync.HistorySyncType.RECENT,
+        progress: 100,
+        conversations: [{
+            id: CHAT,
+            messages: [{
+                message: {
+                    key: { id: 'HISTMSG-1', fromMe: false, remoteJid: CHAT },
+                    message: { conversation: 'from history' },
+                    messageTimestamp: 1700000000
+                }
+            }]
+        }]
+    })).finish();
+    return {
+        // fromMe: the self-only protocol types are dropped from a non-self origin
+        key: { id: stanzaId, fromMe: true, remoteJid: ME },
+        message: {
+            protocolMessage: {
+                type: proto.Message.ProtocolMessage.Type.HISTORY_SYNC_NOTIFICATION,
+                historySyncNotification: {
+                    syncType: proto.HistorySync.HistorySyncType.RECENT,
+                    chunkOrder: 1,
+                    initialHistBootstrapInlinePayload: await deflatePromise(chunk)
+                }
+            }
+        }
+    };
+};
+
 const deliverTwice = async (build, ctxExtra = {}) => {
     const emitted = [];
     const ctx = ctxFor(emitted, ctxExtra);
@@ -155,30 +227,121 @@ test('a redelivered message is processed once', async () => {
 
     // --- a message we could not act on yet stays retryable ---------------
     // An event response whose creation message is not in the store yet cannot
-    // be decrypted; it must NOT be marked as processed, or the redelivery that
+    // be decrypted. It must NOT be marked as processed, or the redelivery that
     // arrives once the creation message is stored would be swallowed and the
-    // response lost forever. Observable through the warn it logs each time.
-    const deferredLogs = [];
-    const deferredEmitted = [];
-    const deferredCtx = ctxFor(deferredEmitted, {
+    // response lost forever.
+    //
+    // Asserted the way a consumer sees it, not by counting logs: the creation
+    // message only becomes available for the second delivery, so the outcome
+    // that matters is the `messages.update` carrying the decrypted response.
+    const creationKey = { id: 'CREATION-1', fromMe: true, remoteJid: CHAT };
+    const eventSecret = Buffer.alloc(32, 7);
+    const encryptedResponse = encryptEventResponse(eventSecret, creationKey);
+    let storeLookups = 0;
+    const retryEmitted = [];
+    const retryCtx = ctxFor(retryEmitted, {
         processedMessageCache: new NodeCache({ stdTTL: 600, useClones: false }),
-        logger: {
-            ...silentLogger(),
-            warn: (...a) => { deferredLogs.push(JSON.stringify(a)); }
-        }
+        getMessage: async () => (++storeLookups === 1
+            ? undefined
+            : { messageContextInfo: { messageSecret: eventSecret } })
     });
-    const undecryptable = () => ({
+    const eventResponseStanza = () => ({
         key: { id: 'EVENT-1', fromMe: false, remoteJid: CHAT, participant: CHAT },
         message: {
             encEventResponseMessage: {
-                eventCreationMessageKey: { id: 'CREATION-1', fromMe: true, remoteJid: CHAT }
+                eventCreationMessageKey: creationKey,
+                ...encryptedResponse
             }
         }
     });
-    await processMessage(undecryptable(), deferredCtx);
-    await processMessage(undecryptable(), deferredCtx);
+    await processMessage(eventResponseStanza(), retryCtx);
     assert.equal(
-        deferredLogs.filter(l => l.includes('event creation message not found')).length, 2,
-        'an undecryptable message must stay unmarked so its redelivery retries'
+        retryEmitted.filter(e => e.event === 'messages.update').length, 0,
+        'with no creation message in the store there is nothing to update yet'
     );
+    await processMessage(eventResponseStanza(), retryCtx);
+    const updates = retryEmitted.filter(e => e.event === 'messages.update');
+    assert.equal(
+        updates.length, 1,
+        'the redelivery must be retried and emit its update, not swallowed by the cache'
+    );
+    assert.equal(updates[0].data[0].key.id, 'CREATION-1');
+    assert.equal(updates[0].data[0].update.eventResponses.length, 1);
+    assert.equal(
+        updates[0].data[0].update.eventResponses[0].response.response,
+        proto.Message.EventResponseMessage.EventResponseType.GOING,
+        'and the response must be the decrypted one, not a placeholder'
+    );
+    // now that it succeeded it is marked, so a third delivery adds nothing
+    await processMessage(eventResponseStanza(), retryCtx);
+    assert.equal(
+        retryEmitted.filter(e => e.event === 'messages.update').length, 1,
+        'a delivery after a successful retry must dedupe'
+    );
+});
+
+test('a history-sync stanza deferred before the initial sync completes still lands on retry', async () => {
+    // shouldProcessHistoryMsg:false means the initial sync has not finished, so
+    // there is nowhere to put the chunk yet. Nothing was done, so the stanza
+    // must NOT be marked -- otherwise the notification the server resends once
+    // the sync does complete is mistaken for a redelivery of a handled message
+    // and the whole chunk is silently dropped.
+    const processedMessageCache = new NodeCache({ stdTTL: 600, useClones: false });
+    const emitted = [];
+    const stanza = await historySyncStanza('HIST-1');
+
+    const deferring = ctxFor(emitted, { processedMessageCache, shouldProcessHistoryMsg: false });
+    await processMessage(stanza, deferring);
+    await processMessage(stanza, deferring);
+    assert.equal(
+        emitted.filter(e => e.event === 'messaging-history.set').length, 0,
+        'no history is available while the initial sync is still pending'
+    );
+
+    // the retry, once the sync has completed: the chunk must actually arrive,
+    // which is the part "nothing was logged" could never show
+    const ready = ctxFor(emitted, { processedMessageCache, shouldProcessHistoryMsg: true });
+    await processMessage(stanza, ready);
+    const sets = emitted.filter(e => e.event === 'messaging-history.set');
+    assert.equal(sets.length, 1, 'the retry must deliver the chunk exactly once');
+    assert.equal(
+        sets[0].data.messages.length, 1,
+        'and deliver its messages, not just the event'
+    );
+    assert.equal(sets[0].data.messages[0].message.conversation, 'from history');
+
+    // marked now, so the server resending it again is a redelivery
+    await processMessage(stanza, ready);
+    assert.equal(
+        emitted.filter(e => e.event === 'messaging-history.set').length, 1,
+        'a delivery after a successful history sync must dedupe'
+    );
+});
+
+test('a redelivered ordinary message is upserted once through the real CB:message path', async () => {
+    // processMessage's guard only covers what processMessage emits, and the
+    // ordinary-message route emits `messages.upsert` from upsertMessage in
+    // lib/Socket/chats.js -- before processMessage is ever reached. Driven
+    // through the real handler here: a redelivered stanza is a second
+    // ws.emit('CB:message', ...) of the same stanza, not a second call into
+    // processMessage, which the previous test would not catch.
+    //
+    // The outbound sendReceipt in handleMessage (messages-recv.js, above the
+    // upsertMessage call) still fires per redelivery; that guard belongs at a
+    // call site in another file and is tracked as a follow-up.
+    const { code, stdout, stderr } = await runScenario(`
+const h = await startHarness();
+await tick(50);
+const delivered = [];
+h.sock.ev.on('messages.upsert', e => delivered.push(e.messages.map(m => m.key.id).join(',')));
+h.sock.ws.emit('CB:message', PLAINTEXT_STANZA('DUP-1'));
+await tick(400);
+h.sock.ws.emit('CB:message', PLAINTEXT_STANZA('DUP-1'));
+await tick(400);
+console.log('delivered=' + JSON.stringify(delivered));
+await h.close();
+process.exit(0);
+`);
+    assert.equal(code, 0, stderr);
+    assert.match(stdout, /delivered=\["DUP-1"\]/, 'a redelivered stanza must not reach the consumer twice');
 });
