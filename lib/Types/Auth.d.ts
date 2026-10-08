@@ -99,6 +99,11 @@ export type SignalKeyStore = {
 };
 export type SignalKeyStoreWithTransaction = SignalKeyStore & {
     isInTransaction: () => boolean;
+    /**
+     * Disables the AsyncLocalStorage behind the transaction context. Safe to call from
+     * inside a transaction (end() does): the disable then lands immediately instead of
+     * queueing behind the mutex that transaction is holding.
+     */
     disposeTransactionStorage: () => Awaitable<void>;
     transaction<T>(exec: () => Promise<T>): Promise<T>;
 };
