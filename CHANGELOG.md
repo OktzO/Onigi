@@ -221,11 +221,11 @@ were:
   warns with a typed code instead of passing for a forgery.
 - **`deviceSentMessage` keeps the outer `messageContextInfo`** — the unwrap in
   `lib/Utils/decode-wa-message.js` replaced the decoded message with the inner
-  one wholesale, discarding the wrapper's `messageContextInfo`. That field is
+one wholesale, discarding the wrapper's `messageContextInfo`. That field is
   where a sender puts `messageSecret` (`lib/Socket/messages-send.js:592-596`), and
-  it is what `lib/Utils/process-message.js:497` and `:657` need to decrypt the
-  event/poll response the message references — so a linked device's own edit lost
-  the secret that decrypts it. The secret is now read before the unwrap and
+  it is what `lib/Utils/process-message.js:497` needs to decrypt the
+  event/poll creation the message references — so any message a linked device
+  sent lost the secret that decrypts it. The secret is now read before the unwrap and
   re-attached when the inner message has none of its own; an inner secret is
   left alone.
 - **A lottie sticker normalises to its content** — `normalizeMessageContent`
