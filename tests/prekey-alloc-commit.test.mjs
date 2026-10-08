@@ -70,6 +70,41 @@ process.exit(0);
 	assert.match(stdout, /firstUnuploadedPreKeyId=0/);
 });
 
+test('an interleaved commit cannot move firstUnuploadedPreKeyId backwards', async () => {
+	/*
+	 * The interleave the reviewer reproduced, against a real socket:
+	 *   consumer B (sendRetryRequest, count 1) allocates and keeps its snapshot
+	 *   consumer A (uploadPreKeys, count 20) allocates and commits 21
+	 *   consumer B applies its own snapshot-derived commit, 2
+	 * Both commitUpdate values were computed by Math.max against the *same* stale
+	 * creds, so neither could see the other's write: the handler's unconditional
+	 * Object.assign then lowered the live counter 21 -> 2. `available` inflated
+	 * with it, so every later top-up minted too few keys.
+	 */
+	const { code, stdout, stderr } = await runScenario(`
+const { getNextPreKeys } = await import(${JSON.stringify(new URL('../lib/Utils/signal.js', import.meta.url).href)});
+const creds = ${PRE_KEY_CREDS};
+const keys = ${KEY_STORE};
+const h = await startHarness({ config: { defaultQueryTimeoutMs: 200, auth: { creds, keys } } });
+// B allocates first and holds the snapshot; nothing is applied yet
+const bAlloc = await getNextPreKeys({ creds: { ...creds }, keys }, 1);
+// A allocates and commits against the live creds
+const aAlloc = await getNextPreKeys({ creds, keys }, 20);
+h.sock.ev.emit('creds.update', aAlloc.allocUpdate);
+h.sock.ev.emit('creds.update', aAlloc.commitUpdate);
+console.log('afterA=' + creds.nextPreKeyId + ',' + creds.firstUnuploadedPreKeyId);
+// B now applies the update it computed from the older snapshot
+h.sock.ev.emit('creds.update', bAlloc.commitUpdate);
+console.log('afterB=' + creds.nextPreKeyId + ',' + creds.firstUnuploadedPreKeyId);
+process.exit(0);
+`);
+	assert.equal(code, 0, stderr);
+	// A allocates 20 over an empty store: nextPreKeyId 1 -> 20, commit 20
+	assert.match(stdout, /afterA=20,20/);
+	// B's commit was computed as 1, from a snapshot taken before A's write
+	assert.match(stdout, /afterB=20,20/, 'the stale commit lowered a monotonic counter');
+});
+
 test('a top-up with available keys mints only the shortfall', async () => {
 	const creds = { nextPreKeyId: 21, firstUnuploadedPreKeyId: 11 };
 	const store = new Map();
