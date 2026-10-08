@@ -219,6 +219,23 @@ were:
 - **Crypto** — a platform that cannot verify a signature is no longer
   indistinguishable from one that found a bad signature: the first occurrence
   warns with a typed code instead of passing for a forgery.
+- **`deviceSentMessage` keeps the outer `messageContextInfo`** — the unwrap in
+  `lib/Utils/decode-wa-message.js` replaced the decoded message with the inner
+  one wholesale, discarding the wrapper's `messageContextInfo`. That field is
+  where a sender puts `messageSecret` (`lib/Socket/messages-send.js:592-596`), and
+  it is what `lib/Utils/process-message.js:497` and `:657` need to decrypt the
+  event/poll response the message references — so a linked device's own edit lost
+  the secret that decrypts it. The secret is now read before the unwrap and
+  re-attached when the inner message has none of its own; an inner secret is
+  left alone.
+- **A lottie sticker normalises to its content** — `normalizeMessageContent`
+  unwraps through `getFutureProofMessage`, whose `||` chain omitted
+  `lottieStickerMessage`, so a sticker of the same `FutureProofMessage` shape as
+  every other entry stayed wrapped.
+- **Windows Desktop advertises `WebSubPlatform.WIN_HYBRID`** — `PLATFORM_MAP`
+  named the retired `WIN32`. Correctness only: this value is read only when
+  `syncFullHistory` is true, which defaults to `false`, so no default
+  configuration changes on the wire.
 
 ### Changed
 
