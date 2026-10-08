@@ -35,13 +35,18 @@ export declare const extractDeviceJids: (result: USyncQueryResultList[], myJid: 
  * @param count number of pre-keys to get or generate
  */
 export declare const getNextPreKeys: ({ creds, keys }: AuthenticationState, count: number) => Promise<{
-    update: Partial<AuthenticationCreds>;
+    newPreKeys: {
+        [id: number]: KeyPair;
+    };
     preKeys: {
         [id: string]: KeyPair;
     };
+    allocUpdate: Partial<AuthenticationCreds>;
+    commitUpdate: Partial<AuthenticationCreds>;
 }>;
 export declare const getNextPreKeysNode: (state: AuthenticationState, count: number) => Promise<{
-    update: Partial<AuthenticationCreds>;
+    allocUpdate: Partial<AuthenticationCreds>;
+    commitUpdate: Partial<AuthenticationCreds>;
     node: BinaryNode;
 }>;
 //# sourceMappingURL=signal.d.ts.map
