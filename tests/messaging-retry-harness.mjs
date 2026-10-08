@@ -22,7 +22,7 @@ import { KEY_BUNDLE_TYPE } from '../lib/Defaults/index.js';
 import { jidNormalizedUser } from '../lib/WABinary/index.js';
 import { noopLogger, startHarness, tick } from './helpers/ev-socket-harness.mjs';
 
-export { jidNormalizedUser, noopLogger, startHarness, tick };
+export { jidNormalizedUser, NodeCache, noopLogger, startHarness, tick };
 
 const execFileAsync = promisify(execFile);
 const HARNESS_URL = new URL(import.meta.url).href;

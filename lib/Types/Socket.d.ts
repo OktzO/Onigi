@@ -86,14 +86,22 @@ export type SocketConfig = {
      * used to determine whether to retry a message or not
      *
      * A cache passed here is the caller's authority over inbound retry
-     * requests: unlike the library's own internal counter cache, which misses
-     * on first use and therefore reads a miss as "nothing charged yet", a miss
-     * here means "not permitted" and no retry request is sent. Omit a key to
-     * suppress the retry for that message.
+     * requests, and the library keeps counting into it, so from the first
+     * retry onwards it holds the same count the library would have kept
+     * internally. To refuse the retry for a message, record a count at or
+     * above `maxMsgRetryCount` under its key (`<id>` for a 1:1 message,
+     * `<id>:<participant>` otherwise) before the stanza arrives; the retry
+     * request is then not sent, the record is left in place, and the refusal is
+     * logged at `warn` rather than swallowed at `debug`.
+     *
+     * A key with no entry is not a refusal. `undefined` is also the only
+     * answer a plain `NodeCache` — exactly what this `CacheStore` type invites
+     * — can give for a key it has never seen, so a miss reads as "nothing
+     * charged yet" and the first retry request goes out.
      *
      * The resend budget for our own outgoing messages is a separate counter on
-     * the same cache and does not follow this rule: a miss there is zero
-     * resends spent, so the first retry is always allowed.
+     * the same cache, written and read by one function and never pruned by
+     * this rule.
      */
     msgRetryCounterCache?: CacheStore;
     /** provide a cache to store a user's device list */
