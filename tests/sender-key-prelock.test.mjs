@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { native } from 'oktz-signal';
 import { makeLibSignalRepository } from '../lib/Signal/libsignal.js';
 import { SenderKeyRecord } from '../lib/Signal/Group/sender-key-record.js';
+import { addTransactionCapability } from '../lib/Utils/auth-utils.js';
 
 // Regression test for task 8: processSenderKeyDistributionMessage used to do a
 // get('sender-key') + storeSenderKey(new SenderKeyRecord()) pair OUTSIDE the
@@ -19,7 +20,20 @@ const GROUP = '120363@g.us';
 const SENDER = '1111111111@s.whatsapp.net';
 const KEY_NAME = `${GROUP}::1111111111::0`;
 
-function makeRawStore(persisted) {
+// The clobber lives at the raw store, so the raw store is what is observed.
+// `makeCacheableSignalKeyStore`'s NodeCache is deliberately omitted: in-tx
+// reads would be served from the transaction's own ctx.cache (and behind that,
+// the NodeCache), masking the store value the parked pre-lock write clobbered.
+//
+// addTransactionCapability is the real transaction wrapper used in production
+// (lib/Socket/socket.js). One instance is created PER REPOSITORY over the
+// shared raw store, NOT a single shared instance: a shared instance serializes
+// out-of-transaction writes per key type through its PQueue, so B's pre-lock
+// write would queue behind A's parked one and the choreography could never
+// run B to completion — it would deadlock instead of reaching the assertion.
+// Two instances give each repo its own queue/mutex while the raw store
+// (and its writes) remain shared, which is exactly what the race exercises.
+function makeRawState(persisted, parkedFirst) {
     return {
         get: async (type, ids) => {
             const bucket = persisted.get(type) || new Map();
@@ -28,6 +42,11 @@ function makeRawStore(persisted) {
             return out;
         },
         set: async (patch) => {
+            if (parkedFirst.setCalled !== true && parkedFirst.isEmpty(patch)) {
+                parkedFirst.setCalled = true;
+                parkedFirst.signal();
+                await parkedFirst.blocked;
+            }
             for (const [type, entries] of Object.entries(patch)) {
                 let bucket = persisted.get(type);
                 if (!bucket) persisted.set(type, bucket = new Map());
@@ -40,45 +59,13 @@ function makeRawStore(persisted) {
     };
 }
 
-// Minimal keys with the same store-global transaction semantics T7 introduced:
-// a single shared mutex chain across every wrapper, so transactions on
-// different repository instances still serialize against one store.
-// Inside a transaction, get/set hit the raw store directly (as far as this
-// test's choreography is concerned every in-lock write is a raw write).
-function makeKeys(rawStore, sharedChain, hooks, self) {
-    let inTx = false;
-    return {
-        get: async (type, ids) => {
-            hooks?.get?.(type, ids, inTx);
-            return rawStore.get(type, ids);
-        },
-        set: async (data) => {
-            if (hooks?.set) await hooks.set(data, inTx);
-            return rawStore.set(data);
-        },
-        isInTransaction: () => inTx,
-        transaction: async (fn) => {
-            const prev = sharedChain.get('tx') || Promise.resolve();
-            const next = prev.then(async () => {
-                inTx = true;
-                try {
-                    return await fn();
-                } finally {
-                    inTx = false;
-                    hooks?.txEnd?.();
-                }
-            });
-            sharedChain.set('tx', next.catch(() => { }));
-            return next;
-        }
-    };
-}
-
-function makeCreds() {
+function makeRepo(state) {
+    const rawStore = state;
+    const keys = addTransactionCapability(rawStore, silentLogger, { maxCommitRetries: 1, delayBetweenTriesMs: 1 });
     const idPriv = Buffer.alloc(32, 0x11), idPub = native.curveGenerateKeypair(idPriv)[0];
     const spkPriv = Buffer.alloc(32, 0x22), spkPub = native.curveGenerateKeypair(spkPriv)[0];
     const with05 = (b32) => Buffer.concat([Buffer.from([0x05]), b32]);
-    return {
+    const creds = {
         registrationId: 42,
         signedIdentityKey: { private: idPriv, public: with05(idPub) },
         signedPreKey: {
@@ -89,75 +76,65 @@ function makeCreds() {
         },
         advanced: { key: Buffer.alloc(32, 7) }
     };
-}
-
-function makeRepo(persisted, sharedChain, hooks) {
-    const rawStore = makeRawStore(persisted);
-    const keys = makeKeys(rawStore, sharedChain, hooks);
-    return makeLibSignalRepository({ creds: makeCreds(), keys }, silentLogger, async () => null);
+    return makeLibSignalRepository({ creds, keys }, silentLogger, async () => null);
 }
 
 test('a concurrently committed sender-key record is not clobbered by a pre-lock empty write', async () => {
     const persisted = new Map();
-    const sharedChain = new Map();
 
     // Sender-side repo produces the real SKDMs: iteration 0, then iteration 1
     // after encrypting one group message.
-    const sender = makeRepo(new Map(), new Map(), null);
+    const senderState = new Map();
+    const sender = makeRepo(makeRawState(senderState, { setCalled: false, isEmpty: () => false, signal() { }, blocked: Promise.resolve() }));
     const skdm0 = await sender.getSenderKeyDistributionMessage({ group: GROUP, meId: SENDER });
-    await sender.encryptGroupMessage({ group: GROUP, meId: SENDER, data: Buffer.from("x") }); const skdm1 = await sender.getSenderKeyDistributionMessage({ group: GROUP, meId: SENDER });
+    await sender.encryptGroupMessage({ group: GROUP, meId: SENDER, data: Buffer.from("x") });
+    const skdm1 = await sender.getSenderKeyDistributionMessage({ group: GROUP, meId: SENDER });
 
     const isEmptyRecordPayload = (data) =>
         !!data['sender-key'] && Object.values(data['sender-key']).every((v) => v && Buffer.from(v).equals(Buffer.from('[]')));
 
-    // S2: repository A's first empty-record sender-key write outside its
-    // transaction. Pre-fix this is the pre-lock clobber; post-fix it never
-    // fires because every sender-key write happens inside the lock.
-    let releaseWrite;
-    const writeBlocked = new Promise((res) => { releaseWrite = () => res(true); });
-    let aPrelockWriteBlocked = null;
-    const s2 = new Promise((res) => { aPrelockWriteBlocked = res; });
-    // S3: repository A's first transaction completed (releases the tx mutex).
-    let aFirstTxDone = null;
-    const s3 = new Promise((res) => { aFirstTxDone = res; });
+    // Park the FIRST empty-record raw sender-key write: pre-fix that is A's
+    // pre-lock write; post-fix no such write ever reaches the raw store (the
+    // in-tx '[]' is overwritten by the populated record before commit).
+    let parkedSignal, releaseWrite;
+    const s2 = new Promise((res) => { parkedSignal = res; });
+    const blocked = new Promise((res) => { releaseWrite = res; });
     let s2Fired = false;
-    let s3Fired = false;
-
-    const hooksA = {
-        set(data, inTx) {
-            if (isEmptyRecordPayload(data) && !inTx && !s2Fired) {
-                s2Fired = true;
-                aPrelockWriteBlocked();
-                return writeBlocked;
-            }
-            return null;
-        },
-        txEnd() {
-            if (!s3Fired) {
-                s3Fired = true;
-                aFirstTxDone();
-            }
-        }
+    const parkedFirst = {
+        setCalled: false,
+        isEmpty: isEmptyRecordPayload,
+        signal: () => { s2Fired = true; parkedSignal(); },
+        blocked,
     };
 
-    const repoA = makeRepo(persisted, sharedChain, hooksA);
-    const repoB = makeRepo(persisted, sharedChain, null);
+    const state = makeRawState(persisted, parkedFirst);
+    const repoA = makeRepo(state);
+    const repoB = makeRepo(state);
 
     const processA = () => repoA.processSenderKeyDistributionMessage({ item: { groupId: GROUP, axolotlSenderKeyDistributionMessage: skdm0 }, authorJid: SENDER });
     const processB = () => repoB.processSenderKeyDistributionMessage({ item: { groupId: GROUP, axolotlSenderKeyDistributionMessage: skdm1 }, authorJid: SENDER });
 
     const pA = processA();
-    if (s2Fired) {
-        // pre-fix path: A's pre-lock empty write is parked; B commits first, then we release
-        const pB = processB();
-        await pB;
+    // Give A a chance to reach its pre-lock write (pre-fix) or finish (post-fix).
+    await Promise.race([s2, pA]);
+    try {
+        if (s2Fired) {
+            // pre-fix path: A's pre-lock empty write is parked; B commits first,
+            // then the parked write is released.
+            const pB = processB();
+            await pB;
+            releaseWrite();
+            await pA;
+        } else {
+            // post-fix path: A's transaction completed without any pre-lock write.
+            const pB = processB();
+            await pB;
+            await pA;
+        }
+    } finally {
+        // Never leave a parked write unreleased — a failing run must reach the
+        // assertions, not deadlock the runner.
         releaseWrite();
-        await pA;
-    } else {
-        // post-fix path: A's transaction completed without any pre-lock write
-        const pB = processB();
-        await pB;
-        await pA;
     }
 
     const buf = persisted.get('sender-key')?.get(KEY_NAME);
