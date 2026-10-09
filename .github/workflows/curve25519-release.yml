@@ -223,6 +223,20 @@ jobs:
             (cd "$d" && npm pack --dry-run)
           done
         working-directory: native/curve25519
+      - name: Dry-run every package with the exact publish flags
+        # The first four attempts each failed on something only the real publish
+        # would have revealed: a missing secret, a directory argument treated as
+        # a package name, and a missing --access. A dry-run with identical flags
+        # catches all three, and it is the only step that can run before any
+        # irreversible action.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish --dry-run --ignore-scripts --provenance --access public
+          for d in npm/*/; do
+            (cd "$d" && npm publish --dry-run --ignore-scripts --provenance --access public)
+          done
+        working-directory: native/curve25519
       - name: Publish Linux platform packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
@@ -232,11 +246,11 @@ jobs:
           # git@github.com/npm/linux-x64-gnu.git. cd into each directory so
           # npm reads the package.json sitting in it.
           for d in npm/*/; do
-            (cd "$d" && npm publish --ignore-scripts --provenance)
+            (cd "$d" && npm publish --ignore-scripts --provenance --access public)
           done
         working-directory: native/curve25519
       - name: Publish main package
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: npm publish --ignore-scripts --provenance
+        run: npm publish --ignore-scripts --provenance --access public
         working-directory: native/curve25519
