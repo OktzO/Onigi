@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import module from 'node:module';
 import { copyFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 
 /*
@@ -46,6 +46,10 @@ const strippedIndex = join(staging, 'index.cjs');
 const strippedSignalIndex = join(staging, 'signal-index.cjs');
 copyFileSync(realIndex, strippedIndex);
 copyFileSync(realSignalIndex, strippedSignalIndex);
+// 0.0.9 resolves the binding in native-loader.cjs, not in index.cjs, so the
+// staged copy has to carry the loader too -- otherwise the reproduction just
+// fails one require() early and never exercises the loader's candidate chain.
+copyFileSync(join(dirname(realIndex), 'native-loader.cjs'), join(staging, 'native-loader.cjs'));
 
 module.registerHooks({
 	resolve(specifier, context, nextResolve) {
@@ -79,10 +83,27 @@ const { Curve } = await import('../lib/Utils/crypto.js');
 const { XEdDsaUnavailableError } = await import('../lib/Modded/curve-native.js');
 
 test('the reproduction really is a prebuild-less oktz-curve25519', () => {
-	assert.throws(
-		() => createRequire(import.meta.url)('oktz-curve25519'),
-		err => err.code === 'MODULE_NOT_FOUND' && /curve25519\..*\.node/.test(err.message)
-	);
+    // Precondition for everything below: curve-native.js must see a *binding-less*
+    // oktz-curve25519, not a broken file layout. Since 0.0.9 the failure comes
+    // from native-loader.cjs, which tries ./curve25519.<platform>.node then
+    // @oktz/curve25519-<platform>, collects the misses and throws one error with
+    // the chain on `.cause`. Staging the real loader with no .node beside it means
+    // every candidate misses, so nothing loads and the "no XEdDSA at all" premise
+    // below holds. (Whether the scoped name appears in the chain is not asserted:
+    // the loader can short-circuit before reaching it, and a bare
+    // `@oktz/curve25519-` prefix is matched by the always-present wasm32 line.)
+    assert.throws(
+        () => createRequire(import.meta.url)('oktz-curve25519'),
+        (err) => {
+            assert.match(err.message, /Cannot find native binding/);
+            const causes = [];
+            for (let c = err.cause; c; c = c.cause) causes.push(String(c.message));
+            const joined = causes.join('\n');
+            assert.match(joined, /Cannot find module '\.\/curve25519\..*\.node'/,
+                `the local prebuild must be absent, got: ${joined}`);
+            return true;
+        }
+    );
 });
 
 test('the reproduction has no XEdDSA implementation at all', () => {

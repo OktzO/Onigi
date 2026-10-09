@@ -3,7 +3,7 @@ import { createRequire } from 'node:module';
 import module from 'node:module';
 import { copyFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 
 /*
@@ -41,6 +41,12 @@ const strippedCurveIndex = join(staging, 'curve-index.cjs');
 const strippedSignalIndex = join(staging, 'signal-index.cjs');
 copyFileSync(realCurveIndex, strippedCurveIndex);
 copyFileSync(realSignalIndex, strippedSignalIndex);
+// oktz-curve25519 0.0.9 resolves its binding in native-loader.cjs, so stage that
+// too. The staged curve-index.cjs is named 'curve-index.cjs', and the loader looks
+// for './native-loader.cjs' relative to itself, so the loader must be copied under
+// the staged name's own directory -- which it is: same dir, and the copy has no
+// .node and no node_modules/@oktz, so every candidate misses.
+copyFileSync(join(dirname(realCurveIndex), 'native-loader.cjs'), join(staging, 'native-loader.cjs'));
 
 module.registerHooks({
     resolve(specifier, context, nextResolve) {
@@ -60,7 +66,22 @@ const curve = await import('../lib/Modded/curve-native.js');
 
 test('the reproduction has no XEdDSA binding at all', () => {
     const req = createRequire(import.meta.url);
-    assert.throws(() => req('oktz-curve25519'), /curve25519\..*\.node|MODULE_NOT_FOUND/);
+    // Both bindings must genuinely be binding-less, not merely malformed. Since
+    // oktz-curve25519 0.0.9 the curve failure is the native-loader one, so match
+    // that and check its cause chain names the local .node it tried. Staging the
+    // real loader with no .node beside it means every candidate misses, so nothing
+    // loads. (The scoped name's presence in the chain is not asserted: the loader
+    // can short-circuit before reaching it, and a bare `@oktz/curve25519-` prefix
+    // is matched by the always-present wasm32 line.)
+    assert.throws(() => req('oktz-curve25519'), (err) => {
+        assert.match(err.message, /Cannot find native binding/);
+        const causes = [];
+        for (let c = err.cause; c; c = c.cause) causes.push(String(c.message));
+        const joined = causes.join('\n');
+        assert.match(joined, /Cannot find module '\.\/curve25519\..*\.node'/,
+            `the local prebuild must be absent, got: ${joined}`);
+        return true;
+    });
     assert.throws(() => req('oktz-signal/native/signal/index.cjs'), /native binding/);
 });
 

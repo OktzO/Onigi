@@ -3,13 +3,13 @@ import { createRequire } from 'node:module';
 import module from 'node:module';
 import { copyFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 
 /*
  * R7: "XEdDSA is unsupported off linux-x64" was FALSE and avoidable.
  *
- * oktz-curve25519 0.0.4 ships exactly one prebuild, but oktz-signal -- already a
+ * oktz-curve25519 published one prebuild for one platform, but oktz-signal -- already a
  * hard dependency, loaded by lib/Signal/libsignal.js -- publishes four through
  * optionalDependencies (signal-linux-{arm64,x64}-{gnu,musl}) and its native
  * module exports a byte-compatible XEdDSA. So on linux-arm64 the fallback added
@@ -28,6 +28,11 @@ const realIndex = createRequire(import.meta.url).resolve('oktz-curve25519');
 const staging = mkdtempSync(join(tmpdir(), 'curve-xeddsa-delegate-'));
 const strippedIndex = join(staging, 'index.cjs');
 copyFileSync(realIndex, strippedIndex);
+// the binding is resolved by native-loader.cjs, so stage it too: the copy has to
+// run the loader's full candidate chain and come up empty, not fail a require()
+// early. No .node and no node_modules/@oktz under the staging dir is what makes
+// it come up empty.
+copyFileSync(join(dirname(realIndex), 'native-loader.cjs'), join(staging, 'native-loader.cjs'));
 
 module.registerHooks({
     resolve(specifier, context, nextResolve) {
@@ -44,9 +49,25 @@ const curve = await import('../lib/Modded/curve-native.js');
 const { Curve, signedKeyPair } = await import('../lib/Utils/crypto.js');
 
 test('the reproduction is oktz-curve25519 without a prebuild, with oktz-signal present', () => {
+    // Since 0.0.9 a binding-less oktz-curve25519 does not throw MODULE_NOT_FOUND
+    // from index.cjs: it throws the loader's "Cannot find native binding", with the
+    // misses for ./curve25519.<platform>.node and @oktz/curve25519-<platform> chained
+    // on `.cause`. Staging the real loader with no .node beside it makes every
+    // candidate miss, so nothing loads and the delegation below is exercised for
+    // real. (The scoped name's presence in the chain is not asserted: the loader
+    // can short-circuit before reaching it, and a bare `@oktz/curve25519-` prefix
+    // is matched by the always-present wasm32 line.)
     assert.throws(
         () => createRequire(import.meta.url)('oktz-curve25519'),
-        err => err.code === 'MODULE_NOT_FOUND' && /curve25519\..*\.node/.test(err.message)
+        (err) => {
+            assert.match(err.message, /Cannot find native binding/);
+            const causes = [];
+            for (let c = err.cause; c; c = c.cause) causes.push(String(c.message));
+            const joined = causes.join('\n');
+            assert.match(joined, /Cannot find module '\.\/curve25519\..*\.node'/,
+                `the local prebuild must be absent, got: ${joined}`);
+            return true;
+        }
     );
     const signalNative = createRequire(import.meta.url)('oktz-signal/native/signal/index.cjs');
     assert.equal(typeof signalNative.curveSign, 'function');

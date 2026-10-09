@@ -183,6 +183,24 @@ Three follow-ups to the gap closure, each with a test:
   that logs and nacks, so a guard there would trade a visible throw for a silent
   dropped message.
 
+- **The curve-fallback reproductions reproduce again.** The four tests that stage
+  a binding-less `oktz-curve25519` — `tests/curve-platform-fallback.test.mjs`,
+  `tests/curve-verify-diagnosis.test.mjs`, `tests/curve-xeddsa-delegation.test.mjs`
+  and `tests/curve-xeddsa-unsupported.test.mjs` — copied only `index.cjs` into a
+  temp dir. Since 0.0.9 the binding is resolved by a generated
+  `native-loader.cjs` that `index.cjs` requires, so the staged copy died on a
+  missing file one step before the condition under test and every precondition
+  assertion failed on `Cannot find module './native-loader.cjs'` instead of
+  `MODULE_NOT_FOUND`. The staging now carries the real loader too, so the copy
+  runs the full candidate chain and genuinely finds nothing, and the assertions
+  match the loader's own `Cannot find native binding` with both misses — the local
+  `./curve25519.<platform>.node` *and* the scoped `@oktz/curve25519-<platform>` —
+  present on `.cause`. A reproduction that only missed the local `.node` would
+  have passed while the scoped package still resolved, which is exactly the
+  arm64-musl case these files guard. No library change: `lib/Modded/curve-native.js`
+  still loads with no binding present, still routes keygen and DH to
+  `node:crypto` (byte-exact against the native path) and XEdDSA to `oktz-signal`.
+
 
 Roughly forty further fixes landed in the same window. Grouped by what they
 were:
@@ -489,6 +507,15 @@ one wholesale, discarding the wrapper's `messageContextInfo`. That field is
 
 ### Changed
 
+- **`oktz-curve25519` is now `^0.0.9`, which ships a real native binding.**
+  Every version before it declared four `@oktz/curve25519-<platform>`
+  optional dependencies that had never been published, so an install resolved
+  no binding at all and fell back to the JS path. 0.0.9 is the first release
+  where npm actually delivers a `.node`, built by a release workflow in this
+  repository for `linux-x64-gnu`, `linux-x64-musl`, `linux-arm64-gnu` and
+  `linux-arm64-musl`. On any other platform the fallback still applies.
+  The previous range was `^0.0.4`, which caret-zero caps at `0.0.4`–`0.0.7`
+  and would never have reached a build that carries one.
 - **`SignalKeyStoreWithTransaction.transaction` no longer takes a key**
   (`4b85ee0`, `00ee356`). The signature is now `transaction<T>(exec)`: the
   library serialises its own transactions on one mutex per store rather than
@@ -542,7 +569,7 @@ exactly because the previous README got it wrong in both directions.
 | package | role | how it ships | platforms |
 |---|---|---|---|
 | `oktz-signal` 0.3.0-rc.1 | E2EE, XEdDSA | `.node` via `optionalDependencies` | `linux-arm64-{gnu,musl}`, `linux-x64-{gnu,musl}` — **four, and no others** |
-| `oktz-curve25519` 0.0.4 | X25519 keygen and DH | one `.node`, **no `optionalDependencies`** | `linux-x64-gnu` only |
+| `oktz-curve25519` 0.0.9 | X25519 keygen and DH | `.node` via `optionalDependencies` | `linux-arm64-{gnu,musl}`, `linux-x64-{gnu,musl}` — four, matching the row above |
 | `whatsapp-rust-bridge` 0.5.4 | WABinary encode | **WebAssembly**, inlined in `dist/index.js` | any platform with WebAssembly |
 | `node:crypto` | AES-GCM, SHA-256, HMAC, X25519, PBKDF2 | Node built-in | any |
 

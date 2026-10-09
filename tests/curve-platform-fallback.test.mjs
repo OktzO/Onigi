@@ -3,19 +3,25 @@ import { createRequire } from 'node:module';
 import module from 'node:module';
 import { copyFileSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 
-// oktz-curve25519 0.0.4 ships exactly ONE prebuild (curve25519.linux-x64-gnu.node)
-// and requires it at the top level of index.cjs, with no optionalDependencies and
-// no JS fallback. Any other platform throws MODULE_NOT_FOUND at import time, and
-// the static `import * as native from 'oktz-curve25519'` in curve-native.js took
-// the whole library down with it. This file reproduces a prebuild-less install by
-// redirecting the specifier at a copy of the real index.cjs with no .node beside it.
+// oktz-curve25519 resolves its binding through native-loader.cjs: it tries
+// ./curve25519.<platform>.node and then @oktz/curve25519-<platform>, which is
+// published per platform through optionalDependencies. When neither resolves --
+// an unpublished platform, an arm64-musl box whose registry copy is stale, a
+// partial `npm i` -- the loader throws at import time, and the static
+// `import * as native from 'oktz-curve25519'` in curve-native.js took the whole
+// library down with it. This file reproduces a binding-less install by
+// redirecting the specifier at a copy of the real index.cjs WITH the real
+// native-loader.cjs beside it and with no binding reachable from that copy:
+// nothing resolves, so the loader runs its full candidate chain and fails, which
+// is the condition curve-native.js has to survive. Staging index.cjs alone
+// would prove nothing -- it would just fail one require() earlier.
 //
-// That is linux-arm64 (and musl) in the field, and since R7 it is NOT an
-// unsupported platform: oktz-signal -- already a hard dependency, already loaded
-// by lib/Signal/libsignal.js -- publishes signal-linux-{arm64,x64}-{gnu,musl}
+// That is linux-arm64 (and musl) in the field, and it is NOT an unsupported
+// platform: oktz-signal -- already a hard dependency, already loaded by
+// lib/Signal/libsignal.js -- publishes signal-linux-{arm64,x64}-{gnu,musl}
 // through optionalDependencies and its curveSign/curveVerify are byte-compatible
 // with oktz-curve25519's. So keygen and DH fall back to node:crypto and XEdDSA
 // delegates to oktz-signal. tests/curve-xeddsa-unsupported.test.mjs covers the
@@ -25,6 +31,10 @@ const realIndex = createRequire(import.meta.url).resolve('oktz-curve25519');
 const staging = mkdtempSync(join(tmpdir(), 'curve-no-prebuild-'));
 const strippedIndex = join(staging, 'index.cjs');
 copyFileSync(realIndex, strippedIndex);
+// the loader is what resolves the binding, so the copy has to carry it or the
+// reproduction is just a missing-file test. Both files go in; no .node and no
+// node_modules/@oktz does, which is what makes every candidate miss.
+copyFileSync(join(dirname(realIndex), 'native-loader.cjs'), join(staging, 'native-loader.cjs'));
 
 module.registerHooks({
     resolve(specifier, context, nextResolve) {
@@ -36,9 +46,25 @@ module.registerHooks({
 });
 
 test('the reproduction really is a prebuild-less oktz-curve25519', () => {
+    // Since 0.0.9 the failure is the loader's, not a bare MODULE_NOT_FOUND from
+    // index.cjs: native-loader.cjs tries every candidate, collects the misses and
+    // throws one error with the chain hung off `.cause`. This asserts the top-level
+    // shape and the local prebuild being absent -- every candidate misses, so
+    // nothing loads. It deliberately does not claim to prove the scoped package is
+    // unresolvable: on a host where an earlier candidate fails hard the loader
+    // short-circuits before naming it, and a bare `@oktz/curve25519-` prefix is
+    // satisfied by the always-present wasm32 line either way.
     assert.throws(
         () => createRequire(import.meta.url)('oktz-curve25519'),
-        (err) => err.code === 'MODULE_NOT_FOUND' && /curve25519\..*\.node/.test(err.message)
+        (err) => {
+            assert.match(err.message, /Cannot find native binding/);
+            const causes = [];
+            for (let c = err.cause; c; c = c.cause) causes.push(String(c.message));
+            const joined = causes.join('\n');
+            assert.match(joined, /Cannot find module '\.\/curve25519\..*\.node'/,
+                `the local prebuild must be absent, got: ${joined}`);
+            return true;
+        }
     );
 });
 
