@@ -218,17 +218,22 @@ jobs:
       - name: Verify publish tarballs
         run: |
           npm pack --dry-run
-          npm pack --dry-run --prefix npm/linux-x64-gnu
-          npm pack --dry-run --prefix npm/linux-x64-musl
-          npm pack --dry-run --prefix npm/linux-arm64-gnu
+          for d in npm/*/; do
+            echo "--- $d"
+            (cd "$d" && npm pack --dry-run)
+          done
+        working-directory: native/curve25519
       - name: Publish Linux platform packages
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          npm publish --ignore-scripts --provenance npm/linux-x64-gnu
-          npm publish --ignore-scripts --provenance npm/linux-x64-musl
-          npm publish --ignore-scripts --provenance npm/linux-arm64-gnu
-          npm publish --ignore-scripts --provenance npm/linux-arm64-musl
+          # `npm publish <dir>` treats <dir> as a package NAME, not a folder --
+          # it resolved npm/linux-x64-gnu as an unscoped package and tried
+          # git@github.com/npm/linux-x64-gnu.git. cd into each directory so
+          # npm reads the package.json sitting in it.
+          for d in npm/*/; do
+            (cd "$d" && npm publish --ignore-scripts --provenance)
+          done
         working-directory: native/curve25519
       - name: Publish main package
         env:
