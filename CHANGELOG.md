@@ -156,7 +156,33 @@ read again.
   signs is signed by a local key, not WhatsApp's root — and
   `examples/01-connect.mjs` asserts the resulting refusal rather than hiding it.
 
+
 ### Fixed
+
+Three follow-ups to the gap closure, each with a test:
+
+- **The event buffer no longer drops events emitted re-entrantly from a flush**
+  (`96e8c65`). `flush()` reassigned the live buffer only *after* its synchronous
+  emit, so a listener that reacted by calling `emit()` again had its event
+  appended to a buffer that was then discarded. The same shape in the
+  `messages.upsert` type-mismatch path was fixed alongside it
+  (`lib/Utils/event-buffer.js:186-224`).
+
+- **`requestPlaceholderResend` no longer races itself** (`d1a3d55`). The
+  read-decide-write against the placeholder cache was unsynchronised, so two
+  concurrent requests for one message both saw "not yet requested" and both put
+  a `placeholderMessageResendRequest` on the wire. The three steps now run under
+  a per-message-id lock, released before the settle delay so it never serialises
+  unrelated sends. A message with no id is rejected outright instead of being
+  filed under the shared `undefined` cache key.
+
+- **A call reject is skipped when there is no identity** (`5d4a663`). The reject
+  stanza is addressed from `creds.me.id`; with no identity the stanza was
+  malformed rather than the call being rejected. Two sibling reads of
+  `creds.me.id` were deliberately left alone — both already sit inside a handler
+  that logs and nacks, so a guard there would trade a visible throw for a silent
+  dropped message.
+
 
 Roughly forty further fixes landed in the same window. Grouped by what they
 were:
