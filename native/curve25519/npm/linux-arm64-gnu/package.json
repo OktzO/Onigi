@@ -1,6 +1,6 @@
 {
   "name": "@oktz/curve25519-linux-arm64-gnu",
-  "version": "0.0.9",
+  "version": "0.0.10",
   "description": "curve25519-js replacement — XEdDSA sign/verify native Rust (linux-arm64-gnu)",
   "license": "MIT",
   "main": "curve25519.linux-arm64-gnu.node",

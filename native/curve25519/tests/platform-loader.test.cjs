@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 const test = require('node:test');
 const { createRequire } = require('node:module');
 const { createPrivateKey, createPublicKey } = require('node:crypto');
+const { readFileSync, readdirSync, existsSync } = require('node:fs');
+const { join } = require('node:path');
 const curve = require('../index.cjs');
 
 /*
@@ -142,5 +144,34 @@ test('this crate and oktz-signal agree on verify, including the low-order forger
       'this crate must reject the signature under a wrong message');
     assert.equal(signal.curveVerify(publicKey, Buffer.from('wrong message'), ours), false,
       'oktz-signal must reject the signature under a wrong message');
+  }
+});
+
+/*
+ * napi bakes the binding version into every candidate in native-loader.cjs, from
+ * the version in package.json at build time. A release that bumps package.json
+ * without regenerating the loader leaves the loader expecting the previous
+ * version, and the mismatch is invisible until someone sets
+ * NAPI_RS_ENFORCE_VERSION_CHECK -- the check is skipped by default. That is how
+ * 0.0.9 shipped a loader that expected 0.0.8 while every platform package was
+ * 0.0.9: the suite was green and the broken path was one env var away.
+ */
+test('the loader and every platform package agree on the version', () => {
+  const { version } = require('../package.json');
+  const loader = readFileSync(join(__dirname, '..', 'native-loader.cjs'), 'utf8');
+
+  const baked = [...loader.matchAll(/bindingPackageVersion !== '([^']+)'/g)].map((m) => m[1]);
+  assert.ok(baked.length > 0, 'the loader must version-check its candidates');
+  for (const v of new Set(baked)) {
+    assert.equal(v, version,
+      `native-loader.cjs expects ${v} but package.json is ${version}; ` +
+      'regenerate with `napi build --platform --js-package-name @oktz/curve25519`');
+  }
+
+  for (const dir of readdirSync(join(__dirname, '..', 'npm'))) {
+    const pkg = join(__dirname, '..', 'npm', dir, 'package.json');
+    if (!existsSync(pkg)) continue;
+    assert.equal(require(pkg).version, version,
+      `${dir} is not at ${version}; a partial version set installs nothing`);
   }
 });
