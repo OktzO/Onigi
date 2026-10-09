@@ -237,7 +237,259 @@ one wholesale, discarding the wrapper's `messageContextInfo`. That field is
   `syncFullHistory` is true, which defaults to `false`, so no default
   configuration changes on the wire.
 
+- **A media download that dies mid-stream rejects instead of killing the
+  process** (`ea2dde4`). `downloadEncryptedContent` ended with
+  `return fetched.pipe(output, { end: true })`, and `pipe()` attaches no
+  `'error'` listener to the source. When the socket died part-way through — the
+  undici body from `getHttpStream` emits `TypeError: terminated` — nothing in the
+  chain was listening, so the event went uncaught and took the process down. For
+  an unattended consumer that is a crash from any transient network blip. The
+  chain is now `stream.pipeline`, which puts every stream under an error
+  listener, destroys the decrypting `Transform` with the source error and covers
+  premature close; the failure reaches the caller as a rejection on the returned
+  stream, which is what the `for await` consumers and `history.js` already
+  expected (`lib/Utils/messages-media.js:543`).
+
+- **The media re-upload retry actually runs** (`47040f4`, `1f08d25`). Two
+  independent defects, both of which had to be fixed for the 404/410 path to
+  work at all:
+  - `lib/Utils/messages.js:855` read the HTTP status off `error.status`, but a
+    `@hapi/boom` error carries it on `output.statusCode` — verified on the
+    installed 9.1.4, whose `Object.keys(err)` is
+    `data, isBoom, isServer, output` and has no `.status`. The guard never
+    matched, so a media download answered with an expired URL threw `Boom 410`
+    straight at the caller and the re-upload branch was unreachable. `error.status`
+    remains as the fallback, because `ctx` is third-party-owned and a caller's own
+    `downloadContentFromMessage` can throw a plain object carrying a bare status.
+  - `getMediaRetryKey` passed a `mediaKey` to `hkdf` as-is. A `mediaKey` is a
+    proto `bytes` field, which survives a `toJSON` round-trip as a base64
+    *string*, so the persisted shape was hashed as UTF-8 bytes and encrypt and
+    decrypt derived different keys. The string is now decoded as base64,
+    stripping a `data:;base64,` prefix the same way `getMediaKeys`
+    (`lib/Utils/messages-media.js:86`) does, so there is one string-normalisation
+    rule in the file instead of two that can drift
+    (`lib/Utils/messages-media.js:729-737`).
+
+  The recovery log line is optional-chained as well (`lib/Utils/messages.js:861`):
+  it is reachable for the first time in this tree's history now that the guard
+  above it is live, and a caller passing `{ reuploadRequest }` without a logger
+  got a `TypeError` instead of the `Boom` — the recovery defeated by the
+  recovery.
+
+- **Presence is announced only on an actual name change** (`5b3e93c`). The
+  `creds.update` handler compared the incoming `name` against `creds.me?.name`,
+  but `creds` is the merged state, whose `me.name` outlives every partial
+  update — so the event payload was the only thing that could say whether a name
+  had been received. Any other `creds.update` (key churn, for instance) fired the
+  comparison, and the resulting attribute-less `<presence/>` reads as "available":
+  the account was held announced online and WhatsApp stopped pushing to the
+  phone. The comparison now also requires the event to carry a name
+  (`lib/Socket/socket.js:978`).
+
+- **`offline='0'` is treated as a live message** (`73e4fa7`). `offline` is the
+  string `'0'` or `'1'`, not a boolean, and three sites tested it for truthiness.
+  A live message therefore read as a history backfill: `messages.upsert` was
+  emitted with `type: 'append'` instead of `'notify'`, and the stanza was queued
+  to the offline processor instead of dispatched. The one predicate,
+  `isOfflineNode` (`lib/Utils/offline-node-processor.js:6`), matches `'1'`
+  exactly, so an unexpected value falls through to the live path
+  (`lib/Socket/messages-recv.js:1554`, `:1601`, `:1754`).
+
+- **A notification that arrives before login is acked** (`e6d0782`).
+  `sendMessageAck` read `authState.creds.me.id` unguarded, so a pre-login
+  notification — a `companion_reg_refresh`, for instance — threw a `TypeError`
+  inside the ack, the error was logged as "failed to ack notification", and no
+  ack stanza went out at all. `me` is now optional-chained
+  (`lib/Socket/messages-recv.js:385`); `buildAckStanza` uses `meId` only for a
+  message-class `attrs.from`, so an absent `me` still yields a valid stanza
+  rather than `to: undefined`.
+
+- **The per-socket `AsyncLocalStorage` is released when the socket ends**
+  (`245a5ac`, `9a8143c`, `ebcb13a`). `addTransactionCapability` creates one
+  `AsyncLocalStorage` per socket and never disabled it; an enabled store stamps
+  every live async resource process-wide, so a reconnecting consumer leaked one
+  instance per socket. `end()` now disposes it
+  (`lib/Socket/socket.js:1051`, `lib/Utils/auth-utils.js:222`), and the dispose
+  is sequenced rather than immediate: it never lands on top of a running
+  transaction (which would detach that transaction from its own staged cache and
+  lose writes), and never inside the mutex it is trying to protect. Calling it
+  from inside a transaction — which is what `end()` does — takes the lock-free
+  path, because that frame provably already holds the mutex.
+
+- **The transaction mutex is one per store, not one per caller-supplied
+  string** (`4b85ee0`, `00ee356`). `transaction(work, key)` took a key and took
+  a mutex from a map keyed by it, so two transactions under different keys
+  mutated the same key store concurrently and could interleave their commits.
+  The string also let a caller partition the mutex without meaning to, which
+  silently re-opened the race. `transaction` now takes only `work` and is
+  serialised on one mutex per store (`lib/Utils/auth-utils.js:90`,
+  `lib/Types/Auth.d.ts:108`); the per-key map remains for the read path only.
+
+- **A pre-lock read can no longer clobber a populated `SenderKeyRecord`**
+  (`c30071f`). `processSenderKeyDistributionMessage` did a `get('sender-key')`
+  plus a `storeSenderKey(new SenderKeyRecord())` for a miss *outside* the
+  transaction, then repeated the pair inside it. A transaction that committed a
+  populated record in between was clobbered by that pre-lock empty write, so the
+  group lost its sender key and its chain. Only the in-transaction pair remains
+  (`lib/Signal/libsignal.js:112-116`).
+
+- **Pre-key counters advance only once the server accepts the upload**
+  (`f4b6e3b`). `firstUnuploadedPreKeyId` was advanced at *generation* time,
+  conflated with `nextPreKeyId` in one `creds.update`. Two consequences: a
+  permanently failing upload orphaned every key it had generated (the counter had
+  already skipped past them, so the next upload never retried them and the
+  account slowly drained its server-side pre-keys), and
+  `available = nextPreKeyId - firstUnuploadedPreKeyId` was structurally `0`, so
+  a top-up minted a whole new batch instead of the shortfall. Allocation now
+  advances `nextPreKeyId` immediately and only the allocation is emitted;
+  `firstUnuploadedPreKeyId` is emitted after the server's `iq` result comes back
+  error-free, including for the pre-key a retry receipt carries
+  (`lib/Utils/signal.js:182-187`, `lib/Socket/socket.js:392-418`).
+
+  Two follow-ups on the same counters (`5764d63`): a failed allocation now
+  restores `nextPreKeyId` by compare-and-swap, since the emit above it had
+  already moved the counter over ids that were never written, and both counters
+  are clamped against the live `creds` at emit time (`lib/Socket/socket.js:993`)
+  — they are computed from a snapshot taken at alloc time, so two interleaved
+  consumers could otherwise let the slower one's stale value move a counter
+  backwards.
+
+- **A stale LID mapping is reconciled instead of skipped, and compared by user
+  not by device** (`e15bfd5`, `41239b3`). On a stanza announcing a
+  LID↔PN pair, the mapping was only written when no PN was recorded for that LID
+  at all. A *different* PN recorded against the same LID — the stale case — was
+  left in place, so the session never moved and every message from the real owner
+  was undecryptable. The pair is now overwritten and the session migrated, under
+  a per-alt-address mutex so two inbound messages from the same participant
+  cannot both migrate it (`lib/Socket/messages-recv.js:38`, `:1414-1420`). The
+  comparison itself is by user, because `getPNForLID` fabricates the device-less
+  LID's own device onto the stored PN user: comparing raw jids read that device
+  mismatch as a stale pair and re-stored and re-migrated on *every* inbound
+  message. A missing mapping is still reconciled, since
+  `areJidsSameUser(undefined, jid)` is false.
+
+- **The retry budget is spent exactly once per receipt** (`cfdb44e`,
+  `13054b9`). Three defects in one counter:
+  - The key was `${id}:${participant}` unconditionally, so every stanza without
+    a participant — that is, every 1:1 message — was counted under the literal
+    string `"<id>:undefined"`, and two call sites that disagreed about the key
+    addressed different entries of the same budget. The key is built in one
+    place, with the participant omitted when there is none
+    (`lib/Socket/messages-recv.js:26`).
+  - The read, the test and the write were separate awaits, so two retries for one
+    message arriving on different lock chains both read the old count and one
+    charge was lost — the cap bought more resends than it says. The whole
+    get/test/set is now one critical section on a keyed mutex, for both the
+    inbound retry counter and the resend budget
+    (`lib/Socket/messages-recv.js:49`, `:1106`).
+  - A miss in a *caller-supplied* `msgRetryCounterCache` was read as "refused",
+    which silenced every inbound retry request for anyone who passed a plain
+    `NodeCache` — the shape the `CacheStore` type invites, and the only answer
+    such a cache has for a key it has never seen. A miss is a miss: to refuse a
+    retry, record a count at or above `maxMsgRetryCount` under the message's key,
+    and the refusal is then left in place and logged at `warn` rather than
+    swallowed at `debug` (`lib/Socket/messages-recv.js:466`). See
+    [Changed](#changed) for the contract as types now state it.
+
+- **A redelivered message is processed once** (`c42ac57`, `4384165`). A duplicate
+  stanza — a retry-receipt loop, a repeated frame — re-ran the whole dispatch and
+  emitted a second `messages.upsert`, a second receipt and a second history
+  append. Messages are now marked processed in a 10-minute cache keyed on the
+  chat, the id and a short hash of the re-encoded body, so an identical
+  redelivery dedupes while a *different* message that reuses an id still goes
+  through; an unencodable body yields no key and no dedupe rather than risking a
+  dropped message. The mark is written only after the dispatch succeeded, so a
+  message whose prerequisites were not ready yet stays unmarked and can still be
+  redelivered and retried. The ordinary-message `messages.upsert` in `chats.js`
+  fires before `processMessage` and needed its own check on the same cache
+  (`lib/Utils/process-message.js:208`, `lib/Socket/chats.js:89`, `:968`). The
+  outbound `sendReceipt` still runs once per redelivery and is left as a known
+  gap.
+
+- **A receipt can no longer overwrite a decoded `messageTimestamp`** (`6d8b18c`).
+  When the event buffer merged a buffered `messages.update` into a message it had
+  already decoded, a receipt carried the *receipt's* clock — `0` when the receipt
+  has no usable time — and replaced a timestamp that had been decoded correctly.
+  A `messageTimestamp` that is already set is now sticky: whoever sets one first
+  keeps it, and a later arrival only fills the field if nothing has set it
+  (`lib/Utils/event-buffer.js:743`, used at `:518` and `:545`).
+
+- **A retry resend is encrypted exactly once** (`4a0e9bd`). The retry
+  participant was both encrypted for by the generic per-device fan-out and, a few
+  lines later, by the retry branch's bare `<enc>`, so one resend carried two
+  mutually exclusive shapes for the same device — `<participants>` and a bare
+  `<enc>` — which the server answers `479`. It also advanced the double ratchet
+  twice for one message, so the peer could decrypt only one of the two. The
+  participant is no longer added to the device fan-out, its session is asserted
+  immediately before the single encrypt (so a receipt carrying no key bundle
+  still gets one fetched), and that encrypt is under a per-participant mutex
+  (`lib/Socket/messages-send.js:858`, `:867`).
+
+- **A 1:1 send resolves PN→LID in one identity space** (`4a0e9bd`, `143ac8d`).
+  On a migrated account the server rejects a 1:1 destination still spelled
+  `@s.whatsapp.net`, so the destination is resolved to the peer's LID once one is
+  mapped — but the *sender* identity was derived from the caller's PN, so the
+  stanza could be stamped with one address and delivered to another. The
+  destination is now resolved once, in the caller, and the same value feeds the
+  stanza address, the device enumeration and `contextInfo.participant`; addressing
+  then follows the destination, so a resolved send goes out from your own LID
+  identity (`lib/Socket/messages-send.js:549`). Group, status, newsletter,
+  AppStateSync peer messages and the retry resend keep the caller's jid.
+
+  A PN/LID store that throws now degrades to the jid it was given, with a
+  warning, instead of aborting the whole stanza over a lookup
+  (`lib/Utils/tc-token-utils.js:87`).
+
+- **A status broadcast's recipients are resolved to their LID** (`2612eeb`). Each
+  recipient in `statusJidList` is a peer, and on a migrated account its session
+  is stored under its LID, so encrypting to the caller's PN failed for that
+  recipient. They go through the same PN→LID resolution as the destination, which
+  returns an already-LID jid untouched and falls back to the given jid when
+  nothing maps, so no address is invented
+  (`lib/Socket/messages-send.js:681`).
+
+- **A media send during `CONNECTING` waits, and a failed `media_conn` no longer
+  disables media for the socket's life** (`2af56e7`). A media fetch is two round
+  trips, so it is the send most likely to find the socket not yet open; the
+  `media_conn` `iq` then rejected with `Boom('Connection Closed')` on a socket
+  that had no `'close'` event to recover from, so the fetch now waits for the
+  socket to open first (`lib/Socket/messages-send.js:92`,
+  `lib/Socket/socket.js:617`).
+  Separately, `mediaConn` is a promise: one failed `media_conn` `iq` left a
+  *rejected* promise in the slot, every later caller re-awaited it and rethrew,
+  and media was dead until the socket was recreated. The rejected promise is now
+  dropped and the next caller refetches — the error still reaches the caller that
+  triggered the failing fetch (`lib/Socket/messages-send.js:82`).
+
 ### Changed
+
+- **`SignalKeyStoreWithTransaction.transaction` no longer takes a key**
+  (`4b85ee0`, `00ee356`). The signature is now `transaction<T>(exec)`: the
+  library serialises its own transactions on one mutex per store rather than
+  partitioning them by a caller-supplied string, so the string was only ever able
+  to weaken the guarantee. A key store that implemented the two-argument form
+  still satisfies the new one — the library simply stops passing the key — but a
+  store that relied on the key to serialise *its own* callers' work has to do
+  that itself. The same type gains
+  `disposeTransactionStorage: () => Awaitable<void>`, which the socket calls at
+  `end()`; a store without it is fine, the call is optional-chained
+  (`lib/Types/Auth.d.ts:103-108`).
+
+  *Note:* `docs/api.md` and `docs/quickstart.md` still document the old
+  two-argument `transaction`; those pages have not been updated in this batch.
+
+- **`msgRetryCounterCache`: a miss is a miss, and a refusal is the caller's
+  record** (`f3539d0`, `fc2514a`). The documented contract, now stated at
+  `lib/Types/Socket.d.ts:88-105`: a cache passed here is the caller's authority
+  over inbound retry requests *and the library keeps counting into it*, so from
+  the first retry onwards it holds the same count the library would have kept
+  internally. To refuse the retry for a message, record a count at or above
+  `maxMsgRetryCount` under its key (`<id>` for a 1:1 message,
+  `<id>:<participant>` otherwise) before the stanza arrives; the request is then
+  not sent, the record is left in place, and the refusal is logged at `warn`. A
+  key with no entry is not a refusal. The resend budget for outgoing messages is
+  a separate counter on the same cache and is written and read by one function
+  only.
 
 - **`oktz-signal` is now `^0.3.0-rc.1`**, resolved to `0.3.0-rc.1` in both
   `node_modules` and `package-lock.json`, with `npm ls oktz-signal` reporting a
