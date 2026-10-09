@@ -1,6 +1,6 @@
 {
   "name": "@oktz/curve25519-linux-arm64-gnu",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "curve25519-js replacement — XEdDSA sign/verify native Rust (linux-arm64-gnu)",
   "license": "MIT",
   "main": "curve25519.linux-arm64-gnu.node",
@@ -15,5 +15,14 @@
   ],
   "libc": [
     "glibc"
-  ]
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OktzO/Onigi.git",
+    "directory": "native/curve25519"
+  },
+  "homepage": "https://github.com/OktzO/Onigi/tree/main/native/curve25519",
+  "bugs": {
+    "url": "https://github.com/OktzO/Onigi/issues"
+  }
 }

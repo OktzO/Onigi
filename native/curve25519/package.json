@@ -1,6 +1,6 @@
 {
   "name": "oktz-curve25519",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "description": "curve25519-js replacement — XEdDSA sign/verify native Rust, X25519 node:crypto",
   "main": "index.cjs",
   "license": "MIT",
@@ -16,15 +16,24 @@
     "docs:verify": "node docs/verify.mjs"
   },
   "optionalDependencies": {
-    "@oktz/curve25519-linux-arm64-gnu": "0.0.7",
-    "@oktz/curve25519-linux-arm64-musl": "0.0.7",
-    "@oktz/curve25519-linux-x64-gnu": "0.0.7",
-    "@oktz/curve25519-linux-x64-musl": "0.0.7"
+    "@oktz/curve25519-linux-arm64-gnu": "0.0.8",
+    "@oktz/curve25519-linux-arm64-musl": "0.0.8",
+    "@oktz/curve25519-linux-x64-gnu": "0.0.8",
+    "@oktz/curve25519-linux-x64-musl": "0.0.8"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.10.4"
   },
   "engines": {
     "node": ">=20.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OktzO/Onigi.git",
+    "directory": "native/curve25519"
+  },
+  "homepage": "https://github.com/OktzO/Onigi/tree/main/native/curve25519",
+  "bugs": {
+    "url": "https://github.com/OktzO/Onigi/issues"
   }
 }
