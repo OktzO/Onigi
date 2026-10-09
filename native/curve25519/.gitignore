@@ -9,4 +9,3 @@ target/
 # run killed mid-block does not leave an untracked file that looks like an
 # example.
 .docs-verify.*
-npm/
