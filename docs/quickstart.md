@@ -35,7 +35,8 @@ sock.ev.on('creds.update', saveCreds);
 
 `useMultiFileAuthState` is a plain-file implementation of the `auth.keys` store
 the library requires. Any store with `get`, `set`, `del` and `transaction` works;
-`transaction` must be a per-key mutex (a promise chain), not a rollback — see
+`transaction` must be a mutex (a promise chain), not a rollback — it serialises
+every transaction on the store — see
 [protocol.md §6](protocol.md#6-session-and-key-storage).
 
 ### Pairing
@@ -161,7 +162,7 @@ const silent = { level: 'silent', trace() { }, debug() { }, info() { }, warn() {
 
 const memoryKeyStore = () => {
   const buckets = new Map();
-  const chains = new Map();
+  let chain = Promise.resolve();
   const bucket = type => {
     let b = buckets.get(type);
     if (!b) buckets.set(type, b = new Map());
@@ -184,10 +185,9 @@ const memoryKeyStore = () => {
       }
     },
     del: async key => { for (const b of buckets.values()) b.delete(key); },
-    transaction: (exec, key) => {
-      const previous = chains.get(key) || Promise.resolve();
-      const next = previous.then(exec, exec);
-      chains.set(key, next.then(() => { }, () => { }));
+    transaction: exec => {
+      const next = chain.then(exec, exec);
+      chain = next.then(() => { }, () => { });
       return next;
     }
   };

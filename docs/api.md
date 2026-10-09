@@ -265,10 +265,14 @@ nothing. Read the QR from `connection.update` instead.
 get(type, ids?: string[]): Promise<Record<string, any>>
 set(patch: Record<string, Record<string, any>>): Promise<void>
 del(key: string): Promise<void>
-transaction<T>(exec: () => Promise<T>, key: string): Promise<T>
+transaction<T>(exec: () => Promise<T>): Promise<T>
 ```
 
-`transaction` must be a **per-key mutex** — a promise chain — not a rollback. A
+`transaction` must be a **mutex** — a promise chain — not a rollback. It
+serialises every transaction on the store: one transaction at a time, not one per
+key. A caller-supplied key was removed, because keying the mutex per caller let
+pre-key transactions run concurrently with decrypt and session transactions
+mutating the same store, which lost updates. A
 rollback would be wrong: the library relies on a write committed inside a
 transaction surviving a later failure within the same transaction, which is
 exactly what makes the post-MAC identity write in
