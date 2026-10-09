@@ -1,0 +1,218 @@
+name: Release curve25519 native bindings
+
+on:
+  push:
+    tags:
+      - 'curve25519-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+
+# `oktz-curve25519` ships a hand-written `index.cjs` that is a thin wrapper over
+# the generated `native-loader.cjs`; the loader itself is pure napi-rs output
+# with no hand patches, so regenerating it per target is safe. Only the wrapper
+# is hand-maintained, and no job here writes it.
+#
+# android-arm64 is built and uploaded as an artifact but deliberately NOT
+# published: nothing in this file has ever executed that .node on an Android
+# runtime, so publishing it would ship an artifact of unknown behaviour under a
+# version that claims it works. `oktz-signal/.github/workflows/release.yml`
+# carries the same reasoning. Do not re-add the publish step without a job that
+# actually loads it under Termux.
+
+jobs:
+  build:
+    name: ${{ matrix.package }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            package: linux-x64-gnu
+            command: npm exec -- napi build --release --target x86_64-unknown-linux-gnu --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+          - target: x86_64-unknown-linux-musl
+            package: linux-x64-musl
+            command: npm exec -- napi build --release --target x86_64-unknown-linux-musl --cross-compile --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+          - target: aarch64-unknown-linux-gnu
+            package: linux-arm64-gnu
+            command: npm exec -- napi build --release --target aarch64-unknown-linux-gnu --use-napi-cross --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+          - target: aarch64-unknown-linux-musl
+            package: linux-arm64-musl
+            command: npm exec -- napi build --release --target aarch64-unknown-linux-musl --cross-compile --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+          - target: aarch64-linux-android
+            package: android-arm64
+            command: npm exec -- napi build --release --target aarch64-linux-android --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: native/curve25519/package.json
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
+        with:
+          tool: zig
+      - run: npm ci
+        working-directory: native/curve25519
+      - run: ${{ matrix.command }}
+        working-directory: native/curve25519
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: curve25519-${{ matrix.package }}
+          path: native/curve25519/*.node
+          if-no-files-found: error
+
+  package:
+    name: assemble the platform packages
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: native/curve25519/package.json
+      - run: npm ci
+        working-directory: native/curve25519
+      # `napi artifacts` refuses to run until every target configured in
+      # napi.config.json has a `.node` on disk, so all five are collected into
+      # one output dir before it is invoked. The per-platform package.json
+      # files it writes take their version from native/curve25519/package.json.
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: curve25519-linux-x64-gnu
+          path: native/curve25519
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: curve25519-linux-x64-musl
+          path: native/curve25519
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: curve25519-linux-arm64-gnu
+          path: native/curve25519
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: curve25519-linux-arm64-musl
+          path: native/curve25519
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: curve25519-android-arm64
+          path: native/curve25519
+      - name: Every configured target must be present
+        run: |
+          missing=0
+          for f in curve25519.linux-x64-gnu.node curve25519.linux-x64-musl.node \
+                   curve25519.linux-arm64-gnu.node curve25519.linux-arm64-musl.node \
+                   curve25519.android-arm64.node; do
+            if [ ! -f "$f" ]; then
+              echo "::error::missing $f"
+              missing=1
+            fi
+          done
+          exit $missing
+        working-directory: native/curve25519
+      - name: Confirm the hand-written wrapper is untouched
+        # `index.cjs` is the only hand-maintained file in this package. No build
+        # step writes it; if a future napi-rs change starts doing so, this fails
+        # the publish rather than shipping an overwritten wrapper.
+        run: |
+          if git diff --quiet -- native/curve25519/index.cjs; then
+            echo "index.cjs unmodified"
+          else
+            echo "::error::index.cjs was modified by a build step"
+            git diff -- native/curve25519/index.cjs
+            exit 1
+          fi
+      - run: npm exec -- napi artifacts --config-path napi.config.json --output-dir . --npm-dir npm
+        working-directory: native/curve25519
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: curve25519-packages
+          path: native/curve25519/npm
+          if-no-files-found: error
+
+  verify:
+    name: verify on the host target
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: native/curve25519/package.json
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+      - run: npm ci
+        working-directory: native/curve25519
+      - name: Build the host binding for the test suite
+        # --no-js: the suite needs the .node. `native-loader.cjs` is generated
+        # per platform package, so it is not what is exercised here.
+        run: npm exec -- napi build --release --target x86_64-unknown-linux-gnu --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --no-js -- --locked
+        working-directory: native/curve25519
+      - name: Run the suite that gates this publish
+        run: npm test
+        working-directory: native/curve25519
+      - name: Run the doc examples
+        run: npm run docs:verify
+        working-directory: native/curve25519
+
+  publish:
+    needs:
+      - package
+      - verify
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: native/curve25519/package.json
+      - run: npm ci
+        working-directory: native/curve25519
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: curve25519-packages
+          path: native/curve25519/npm
+      - name: Confirm the hand-written wrapper is untouched
+        # `index.cjs` is the only hand-maintained file in this package and no
+        # build step writes it. If a future napi-rs change starts writing it,
+        # this fails the publish rather than shipping an overwritten wrapper.
+        run: |
+          if git diff --quiet -- native/curve25519/index.cjs; then
+            echo "index.cjs unmodified"
+          else
+            echo "::error::index.cjs was modified by a build step"
+            git diff -- native/curve25519/index.cjs
+            exit 1
+          fi
+      - name: Verify publish tarballs
+        run: |
+          npm pack --dry-run
+          npm pack --dry-run --prefix npm/linux-x64-gnu
+          npm pack --dry-run --prefix npm/linux-x64-musl
+          npm pack --dry-run --prefix npm/linux-arm64-gnu
+          npm pack --dry-run --prefix npm/linux-arm64-musl
+          npm pack --dry-run --prefix npm/android-arm64
+        working-directory: native/curve25519
+      - name: Publish Linux platform packages
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          npm publish --ignore-scripts --provenance npm/linux-x64-gnu
+          npm publish --ignore-scripts --provenance npm/linux-x64-musl
+          npm publish --ignore-scripts --provenance npm/linux-arm64-gnu
+          npm publish --ignore-scripts --provenance npm/linux-arm64-musl
+        working-directory: native/curve25519
+      - name: Publish main package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --ignore-scripts --provenance
+        working-directory: native/curve25519
