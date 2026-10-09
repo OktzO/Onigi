@@ -137,11 +137,14 @@ jobs:
             echo "|---|---|---|---|"
             for d in npm/*/; do
               [ -f "$d/package.json" ] || continue
-              node -e '
-                const p = require("./" + process.argv[1] + "package.json");
-                console.log("| " + p.name + " | " + p.version + " | " + (p.os||[]).join(",") + " | " + (p.cpu||[]).join(",") + " |");
-              ' "$d"
+              name=$(node -p "require('./$d/package.json').name")
+              version=$(node -p "require('./$d/package.json').version")
+              os=$(node -p "(require('./$d/package.json').os||[]).join(',')")
+              cpu=$(node -p "(require('./$d/package.json').cpu||[]).join(',')")
+              echo "| $name | $version | $os | $cpu |"
             done
+            echo ""
+          } >> "$GITHUB_STEP_SUMMARY"
         working-directory: native/curve25519
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
