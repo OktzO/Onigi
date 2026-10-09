@@ -93,8 +93,8 @@ jobs:
             echo "| | |"
             echo "|---|---|"
             echo "| target | \`${{ matrix.target }}\` |"
-            echo "| platform package | \`@oktz-curve25519/curve25519-${{ matrix.package }}\` |"
-            echo "| published on npm | no — every \`@oktz-curve25519/curve25519-*\` name 404s |"
+            echo "| platform package | \`oktz-curve25519-${{ matrix.package }}\` |"
+            echo "| published on npm | no — every \`oktz-curve25519-*\` name 404s |"
             echo "| binary executed here | $([ '${{ matrix.status }}' = built-and-loaded ] && echo yes || echo '**no**') |"
           } >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

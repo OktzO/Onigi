@@ -9,17 +9,17 @@
     "native-loader.cjs"
   ],
   "scripts": {
-    "build": "napi build --release --platform --js-package-name @oktz-curve25519/curve25519",
-    "build:source": "napi build --release --platform --js-package-name @oktz-curve25519/curve25519",
+    "build": "napi build --release --platform --js-package-name @oktz/curve25519",
+    "build:source": "napi build --release --platform --js-package-name @oktz/curve25519",
     "build:manual": "cargo build --manifest-path Cargo.toml --release",
     "test": "node --test tests/*.test.cjs",
     "docs:verify": "node docs/verify.mjs"
   },
   "optionalDependencies": {
-    "@oktz-curve25519/curve25519-linux-arm64-gnu": "0.0.6",
-    "@oktz-curve25519/curve25519-linux-arm64-musl": "0.0.6",
-    "@oktz-curve25519/curve25519-linux-x64-gnu": "0.0.6",
-    "@oktz-curve25519/curve25519-linux-x64-musl": "0.0.6"
+    "@oktz/curve25519-linux-arm64-gnu": "0.0.6",
+    "@oktz/curve25519-linux-arm64-musl": "0.0.6",
+    "@oktz/curve25519-linux-x64-gnu": "0.0.6",
+    "@oktz/curve25519-linux-x64-musl": "0.0.6"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.10.4"

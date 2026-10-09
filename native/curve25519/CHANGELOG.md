@@ -16,7 +16,7 @@ The Rust crate's own version is `0.1.0` (`Cargo.toml`); the npm package's is
 
 ## 0.0.6 — the fixes after 0.0.4, and the first real native binding
 
-`0.0.5` shipped the loader only: its four `@oktz-curve25519/curve25519-*`
+`0.0.5` shipped the loader only: its four `oktz-curve25519-*`
 optional dependencies had never been published, so a consumer got no native
 binding at all. `0.0.6` is the first release that actually carries a `.node`,
 and it carries the fixes below with it. The version moved rather than
@@ -510,7 +510,7 @@ package/curve25519.linux-x64-gnu.node
 `const native = require('./curve25519.linux-x64-gnu.node');` — one line, no
 branch, no platform detection. `oktz-curve25519@1.0.0` is the same layout.
 
-At the time of that download all five `@oktz-curve25519/curve25519-*` names
+At the time of that download all five `oktz-curve25519-*` names
 returned `404` from the registry, which is why the loader could not resolve for
 anyone and the main package could not be published as-is without producing an
 install that always throws `Cannot find native binding` at `require()` time.
@@ -577,7 +577,7 @@ after the `0.0.6` section above.
 
 1. **Only four of the five platform packages are published, and none of them is
    verified end to end.** The four Linux ones ship at `0.0.6` and resolve;
-   `@oktz-curve25519/curve25519-android-arm64` is still gated behind
+   `oktz-curve25519-android-arm64` is still gated behind
    `termux_test_passed` and is not in `optionalDependencies`. Of the four that
    ship, only `linux-x64-gnu` has been loaded by any runner.
 2. **The Android package is absent from `optionalDependencies`.** Even once it

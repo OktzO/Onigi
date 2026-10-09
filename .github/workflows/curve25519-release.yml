@@ -38,16 +38,16 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             package: linux-x64-gnu
-            command: npm exec -- napi build --release --platform --js-package-name @oktz-curve25519/curve25519 --target x86_64-unknown-linux-gnu --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+            command: npm exec -- napi build --release --platform --js-package-name @oktz/curve25519 --target x86_64-unknown-linux-gnu --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
           - target: x86_64-unknown-linux-musl
             package: linux-x64-musl
-            command: npm exec -- napi build --release --platform --js-package-name @oktz-curve25519/curve25519 --target x86_64-unknown-linux-musl --cross-compile --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+            command: npm exec -- napi build --release --platform --js-package-name @oktz/curve25519 --target x86_64-unknown-linux-musl --cross-compile --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
           - target: aarch64-unknown-linux-gnu
             package: linux-arm64-gnu
-            command: npm exec -- napi build --release --platform --js-package-name @oktz-curve25519/curve25519 --target aarch64-unknown-linux-gnu --cross-compile --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+            command: npm exec -- napi build --release --platform --js-package-name @oktz/curve25519 --target aarch64-unknown-linux-gnu --cross-compile --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
           - target: aarch64-unknown-linux-musl
             package: linux-arm64-musl
-            command: npm exec -- napi build --release --platform --js-package-name @oktz-curve25519/curve25519 --target aarch64-unknown-linux-musl --cross-compile --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+            command: npm exec -- napi build --release --platform --js-package-name @oktz/curve25519 --target aarch64-unknown-linux-musl --cross-compile --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -169,7 +169,7 @@ jobs:
         # index.cjs requires ./native-loader.cjs, which in turn locates the
         # .node. A --no-js build emits the .node but no loader, so the suite
         # dies with "Cannot find native binding" — build both here.
-        run: npm exec -- napi build --release --platform --js-package-name @oktz-curve25519/curve25519 --target x86_64-unknown-linux-gnu --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+        run: npm exec -- napi build --release --platform --js-package-name @oktz/curve25519 --target x86_64-unknown-linux-gnu --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
         working-directory: native/curve25519
       - name: Run the suite that gates this publish
         run: npm test

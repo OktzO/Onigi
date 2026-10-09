@@ -33,7 +33,7 @@ still worth describing:
 | | `oktz-curve25519@0.0.4` on npm | `oktz-curve25519@0.0.6` — this directory |
 |---|---|---|
 | `files` | `["index.cjs", "curve25519.linux-x64-gnu.node"]` | `["index.cjs", "native-loader.cjs"]` |
-| `optionalDependencies` | **none** | 4, all `@oktz-curve25519/curve25519-*` |
+| `optionalDependencies` | **none** | 4, all `oktz-curve25519-*` |
 | binaries in the tarball | `curve25519.linux-x64-gnu.node` | none — they come from the platform packages |
 | how the addon is loaded | `require('./curve25519.linux-x64-gnu.node')`, hard-coded, at the top of `index.cjs` | `require('./native-loader.cjs')`, which dispatches on platform |
 | tarball contents | 3 files, 734 523 bytes unpacked | — |
@@ -57,7 +57,7 @@ What changed, in the order it matters to a consumer:
 
 1. **0.0.6 carries a real native binding.** It is the first release of this
    package that publishes a working `.node`. The four
-   `@oktz-curve25519/curve25519-linux-{x64,arm64}-{gnu,musl}` packages are
+   `@oktz/curve25519-linux-{x64,arm64}-{gnu,musl}` packages are
    published and resolvable, and they are declared as `optionalDependencies`
    at `0.0.6` in `package.json`. Before that, `0.0.5` shipped this loader
    against four `optionalDependencies` that did not exist on the registry, so
@@ -108,11 +108,11 @@ built, or supported.
 
 | Target | Platform package | Published at `0.0.6`? | Binary loaded on this host? |
 |---|---|---|---|
-| `x86_64-unknown-linux-gnu` | `@oktz-curve25519/curve25519-linux-x64-gnu` | yes | **yes — built and loaded here, tests run against it** |
-| `x86_64-unknown-linux-musl` | `@oktz-curve25519/curve25519-linux-x64-musl` | yes | compile result only; never loaded |
-| `aarch64-unknown-linux-gnu` | `@oktz-curve25519/curve25519-linux-arm64-gnu` | yes | compile result only; never loaded |
-| `aarch64-unknown-linux-musl` | `@oktz-curve25519/curve25519-linux-arm64-musl` | yes | compile result only; never loaded |
-| `aarch64-linux-android` | `@oktz-curve25519/curve25519-android-arm64` | **no** — gated, see below | compile result only; never loaded |
+| `x86_64-unknown-linux-gnu` | `@oktz/curve25519-linux-x64-gnu` | yes | **yes — built and loaded here, tests run against it** |
+| `x86_64-unknown-linux-musl` | `@oktz/curve25519-linux-x64-musl` | yes | compile result only; never loaded |
+| `aarch64-unknown-linux-gnu` | `@oktz/curve25519-linux-arm64-gnu` | yes | compile result only; never loaded |
+| `aarch64-unknown-linux-musl` | `@oktz/curve25519-linux-arm64-musl` | yes | compile result only; never loaded |
+| `aarch64-linux-android` | `oktz-curve25519-android-arm64` | **no** — gated, see below | compile result only; never loaded |
 
 - **macOS: not built, not published, not supported.** No `darwin` target
   appears in `napi.config.json`, in `optionalDependencies`, or in either
@@ -155,7 +155,7 @@ worth knowing about. Measured on this host with `process.platform` and
 Error: Cannot find native binding. npm has a bug related to optional
 dependencies (https://github.com/npm/cli/issues/4828). Please try `npm i`
 again after removing both package-lock.json and node_modules directory.
-    cause: Cannot find module '@oktz-curve25519/curve25519-wasm32-wasi'
+    cause: Cannot find module 'oktz-curve25519-wasm32-wasi'
 ```
 
 That is what you get on `darwin-x64`, `win32-x64`, `freebsd-x64` and
@@ -164,7 +164,7 @@ absent, which is what every install looked like before `0.0.6`. Two things to
 know:
 
 - The `cause` names the **WASI** package
-  (`@oktz-curve25519/curve25519-wasm32-wasi`, the loader's last fallback at
+  (`oktz-curve25519-wasm32-wasi`, the loader's last fallback at
   `native-loader.cjs:634-655`), not the platform package that was actually
   missing. `error.cause` is a chained summary of every attempt, and the last
   one is the WASI fallback. The platform attempts are in there too.
