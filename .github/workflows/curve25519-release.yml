@@ -32,19 +32,19 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             package: linux-x64-gnu
-            command: npm exec -- napi build --release --target x86_64-unknown-linux-gnu --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+            command: npm exec -- napi build --release --platform --target x86_64-unknown-linux-gnu --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
           - target: x86_64-unknown-linux-musl
             package: linux-x64-musl
-            command: npm exec -- napi build --release --target x86_64-unknown-linux-musl --cross-compile --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+            command: npm exec -- napi build --release --platform --target x86_64-unknown-linux-musl --cross-compile --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
           - target: aarch64-unknown-linux-gnu
             package: linux-arm64-gnu
-            command: npm exec -- napi build --release --target aarch64-unknown-linux-gnu --use-napi-cross --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+            command: npm exec -- napi build --release --platform --target aarch64-unknown-linux-gnu --use-napi-cross --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
           - target: aarch64-unknown-linux-musl
             package: linux-arm64-musl
-            command: npm exec -- napi build --release --target aarch64-unknown-linux-musl --cross-compile --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+            command: npm exec -- napi build --release --platform --target aarch64-unknown-linux-musl --cross-compile --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
           - target: aarch64-linux-android
             package: android-arm64
-            command: npm exec -- napi build --release --target aarch64-linux-android --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
+            command: npm exec -- napi build --release --platform --target aarch64-linux-android --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -53,9 +53,13 @@ jobs:
           cache: npm
           cache-dependency-path: native/curve25519/package.json
       - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
-      - uses: taiki-e/install-action@4cef1412cce204788f482e778a0b9187f9626a29 # v2.87.21
         with:
-          tool: zig
+          targets: x86_64-unknown-linux-gnu, x86_64-unknown-linux-musl, aarch64-unknown-linux-gnu, aarch64-unknown-linux-musl
+      # `--cross-compile` builds the musl targets through cargo-zigbuild, which
+      # needs a real zig on PATH. `taiki-e/install-action` does not support zig
+      # and falls back to cargo-binstall, which resolves zig to a crate wrapper
+      # and then fails with "zig is not found" -- so install it directly.
+      - uses: goto-bus-stop/setup-zig@abea47f85e598557f500fa1fd2ab7464fcb39406 # v2.2.1
       - run: npm ci
         working-directory: native/curve25519
       - run: ${{ matrix.command }}
@@ -168,9 +172,10 @@ jobs:
       - run: npm ci
         working-directory: native/curve25519
       - name: Build the host binding for the test suite
-        # --no-js: the suite needs the .node. `native-loader.cjs` is generated
-        # per platform package, so it is not what is exercised here.
-        run: npm exec -- napi build --release --target x86_64-unknown-linux-gnu --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --no-js -- --locked
+        # index.cjs requires ./native-loader.cjs, which in turn locates the
+        # .node. A --no-js build emits the .node but no loader, so the suite
+        # dies with "Cannot find native binding" — build both here.
+        run: npm exec -- napi build --release --platform --target x86_64-unknown-linux-gnu --config-path napi.config.json --manifest-path Cargo.toml --output-dir . --js native-loader.cjs -- --locked
         working-directory: native/curve25519
       - name: Run the suite that gates this publish
         run: npm test
