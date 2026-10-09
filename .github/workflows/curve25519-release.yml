@@ -108,15 +108,11 @@ jobs:
           path: native/curve25519
       - name: Every configured target must be present
         run: |
-          missing=0
-          for f in curve25519.linux-x64-gnu.node curve25519.linux-x64-musl.node \
-                   curve25519.linux-arm64-gnu.node curve25519.linux-arm64-musl.node; do
-            if [ ! -f "$f" ]; then
-              echo "::error::missing $f"
-              missing=1
-            fi
-          done
-          exit $missing
+          test -f curve25519.linux-x64-gnu.node
+          test -f curve25519.linux-x64-musl.node
+          test -f curve25519.linux-arm64-gnu.node
+          test -f curve25519.linux-arm64-musl.node
+          ls -l curve25519.*.node
         working-directory: native/curve25519
       - name: Confirm the hand-written wrapper is untouched
         # `index.cjs` is the only hand-maintained file in this package. No build
