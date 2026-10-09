@@ -130,6 +130,24 @@ jobs:
           fi
       - run: npm exec -- napi artifacts --config-path napi.config.json --output-dir . --npm-dir npm
         working-directory: native/curve25519
+      - name: Summarise what a tag push would publish
+        run: |
+          {
+            echo "### platform packages assembled"
+            echo ""
+            echo "| package | version | os | cpu |"
+            echo "|---|---|---|---|"
+            for d in npm/*/; do
+              [ -f "$d/package.json" ] || continue
+              node -e '
+                const p = require("./" + process.argv[1] + "package.json");
+                console.log("| " + p.name + " | " + p.version + " | " + (p.os||[]).join(",") + " | " + (p.cpu||[]).join(",") + " |");
+              ' "$d"
+            done
+            echo ""
+            echo "android-arm64 is assembled but never published (see the header note)."
+          } >> "$GITHUB_STEP_SUMMARY"
+        working-directory: native/curve25519
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: curve25519-packages
@@ -165,6 +183,11 @@ jobs:
     needs:
       - package
       - verify
+    # Publishing is irreversible, so a manual dispatch stops after `package`:
+    # the cross-compile, the artifacts assembly and both test suites all run and
+    # their results can be inspected, but nothing reaches the registry until a
+    # `curve25519-v*` tag is pushed. That is the only thing that publishes.
+    if: startsWith(github.ref, 'refs/tags/curve25519-v')
     runs-on: ubuntu-latest
     environment: npm
     steps:
