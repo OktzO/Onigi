@@ -2,7 +2,7 @@
 
 **A native Rust XEdDSA binding for Node.js, exposed through CommonJS.**
 
-[![npm](https://img.shields.io/badge/npm-0.0.4-blue?style=flat-square&logo=npm)](https://www.npmjs.com/package/oktz-curve25519)
+[![npm](https://img.shields.io/badge/npm-0.0.6-blue?style=flat-square&logo=npm)](https://www.npmjs.com/package/oktz-curve25519)
 [![Node](https://img.shields.io/badge/node-%3E%3D20-339933?style=flat-square&logo=nodemon)](https://nodejs.org)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](https://opensource.org/licenses/MIT)
 
@@ -21,54 +21,60 @@ that did not need to exist.
 
 ---
 
-## ⚠️ Read this first: the source here is not what is on npm
+## ⚠️ Read this first: what changed at 0.0.6
 
-**The published `oktz-curve25519@0.0.4` and this directory are different
-artifacts with the same version number.** The multi-platform layout you are
-reading about has never been published. If you `npm install
-oktz-curve25519`, you get the *old* single-platform package.
+**As of `0.0.6`, the published package and this directory are the same
+artifact.** Everything below this point describes `0.0.6`, and `0.0.6` is what
+gets installed. There is no second layout in this README.
 
-This was verified by downloading the tarballs and reading them:
+This was not true of what came before, and the reason the older versions are
+still worth describing:
 
-| | `oktz-curve25519@0.0.4` on npm | this directory |
+| | `oktz-curve25519@0.0.4` on npm | `oktz-curve25519@0.0.6` — this directory |
 |---|---|---|
 | `files` | `["index.cjs", "curve25519.linux-x64-gnu.node"]` | `["index.cjs", "native-loader.cjs"]` |
-| `optionalDependencies` | **none** | 5, all `@oktz-curve25519/curve25519-*` |
+| `optionalDependencies` | **none** | 4, all `@oktz-curve25519/curve25519-*` |
 | binaries in the tarball | `curve25519.linux-x64-gnu.node` | none — they come from the platform packages |
 | how the addon is loaded | `require('./curve25519.linux-x64-gnu.node')`, hard-coded, at the top of `index.cjs` | `require('./native-loader.cjs')`, which dispatches on platform |
 | tarball contents | 3 files, 734 523 bytes unpacked | — |
-| works off linux-x64 | no: the `require` is unconditional, so `require()` **throws** | no, but the failure is a clear "no native binding", and the JS-only half still works |
+| works off linux-x64 | no: the `require` is unconditional, so `require()` **throws** | yes — the platform package is installed and its `.node` is loaded |
 
-The published `index.cjs:16` is the whole difference:
+`0.0.4`'s `index.cjs:16` was the whole difference — this is that line,
+verbatim, from the 0.0.4 tarball, not from this tree:
 
 ```js illustrative
-// published 0.0.4 — this is the shipped line, verbatim
+// oktz-curve25519@0.0.4 — not the shipped line as of 0.0.6
 const native = require('./curve25519.linux-x64-gnu.node');
 ```
 
-against this directory's `index.cjs:16`:
+against this directory's `index.cjs:16`, which is what `0.0.6` ships:
 
 ```js illustrative
 const native = require('./native-loader.cjs');
 ```
 
-Consequences you need to plan around:
+What changed, in the order it matters to a consumer:
 
-1. **The 5 platform packages do not exist on npm.** All five
-   `@oktz-curve25519/curve25519-*` names return `404`. So the layout in this
-   directory cannot work for an installed consumer today, even if the tarball
-   were published as-is. `optionalDependencies` fail soft, so npm would
-   install nothing and the loader would throw `Cannot find native binding`.
-2. **The published package is not a drop-in for this one on any platform.**
-   Same `main`, same export names, different loader.
-3. **`oktz-curve25519@1.0.0` is on npm and is the same single-platform
-   layout** — 3 files, the same two `files` entries, no `optionalDependencies`.
-   The registry's `latest` tag points at `0.0.4`.
+1. **0.0.6 carries a real native binding.** It is the first release of this
+   package that publishes a working `.node`. The four
+   `@oktz-curve25519/curve25519-linux-{x64,arm64}-{gnu,musl}` packages are
+   published and resolvable, and they are declared as `optionalDependencies`
+   at `0.0.6` in `package.json`. Before that, `0.0.5` shipped this loader
+   against four `optionalDependencies` that did not exist on the registry, so
+   an install resolved no native binding at all and `require()` threw.
+2. **`0.0.6` is the first release that carries the library fixes** — the
+   strict `verify` equation, the CSPRNG nonce, the zeroizing and
+   `clamp_scalar` work, and the known-answer vectors. Two of them change
+   observable behaviour, which is why the version moved rather than `0.0.4`
+   being republished. The full list is in [CHANGELOG.md](CHANGELOG.md).
+3. **Only `0.0.4` and `0.0.5` had a different artifact from this tree.** If
+   you have a lockfile pinning either, upgrade; the loader, the export names
+   and `main` are otherwise unchanged, so nothing in your call sites moves.
 
-Nothing in this README describes the npm artifact's behaviour beyond that
-table. If you are consuming from npm, the loader is one line and it does not
-branch; if you are building from this tree, the loader is 782 lines and it
-does.
+Everything this README says about the loader, the exports and the platform
+matrix is about `0.0.6`, which is the npm artifact. The registry also serves
+`oktz-curve25519@1.0.0`, which is the old single-platform layout; that layout
+is `0.0.4`'s, described above, and it is not what `0.0.6` installs.
 
 ---
 
@@ -88,21 +94,25 @@ not this package's:
   failure comes later, at `require()` time, as
   `Cannot find native binding` — with the individual `MODULE_NOT_FOUND`
   errors attached as `error.cause` (`native-loader.cjs:701-712`).
-- If none of the platform packages are actually on the registry, you get the
-  second case, always. That is the current state, per the table above.
+- If the install is broken by something other than the host — a partial
+  `node_modules`, a stale lockfile that still points at `0.0.4` or `0.0.5` —
+  you get the second case too, which is the state every install was in before
+  `0.0.6`.
 
 ## Platform matrix
 
-Declared targets are the five in `napi.config.json` and the five in
-`optionalDependencies`. Nothing else is declared, built, or supported.
+Declared targets are the four in `napi.config.json` and the four in
+`optionalDependencies` at `0.0.6`; the Android target below is built and
+packaged by CI but is deliberately kept out of both. Nothing else is declared,
+built, or supported.
 
-| Target | Platform package | Binary loaded on this host? |
-|---|---|---|
-| `x86_64-unknown-linux-gnu` | `@oktz-curve25519/curve25519-linux-x64-gnu` | **yes — built and loaded here, tests run against it** |
-| `x86_64-unknown-linux-musl` | `@oktz-curve25519/curve25519-linux-x64-musl` | compile result only; never loaded |
-| `aarch64-unknown-linux-gnu` | `@oktz-curve25519/curve25519-linux-arm64-gnu` | compile result only; never loaded |
-| `aarch64-unknown-linux-musl` | `@oktz-curve25519/curve25519-linux-arm64-musl` | compile result only; never loaded |
-| `aarch64-linux-android` | `@oktz-curve25519/curve25519-android-arm64` | compile result only; never loaded, never published |
+| Target | Platform package | Published at `0.0.6`? | Binary loaded on this host? |
+|---|---|---|---|
+| `x86_64-unknown-linux-gnu` | `@oktz-curve25519/curve25519-linux-x64-gnu` | yes | **yes — built and loaded here, tests run against it** |
+| `x86_64-unknown-linux-musl` | `@oktz-curve25519/curve25519-linux-x64-musl` | yes | compile result only; never loaded |
+| `aarch64-unknown-linux-gnu` | `@oktz-curve25519/curve25519-linux-arm64-gnu` | yes | compile result only; never loaded |
+| `aarch64-unknown-linux-musl` | `@oktz-curve25519/curve25519-linux-arm64-musl` | yes | compile result only; never loaded |
+| `aarch64-linux-android` | `@oktz-curve25519/curve25519-android-arm64` | **no** — gated, see below | compile result only; never loaded |
 
 - **macOS: not built, not published, not supported.** No `darwin` target
   appears in `napi.config.json`, in `optionalDependencies`, or in either
@@ -113,10 +123,12 @@ Declared targets are the five in `napi.config.json` and the five in
   `termux_test_passed` that no CI run ever sets. On Termux you get the JS
   wrapper and no `.node` — build it yourself.
 
-The four "compile result only" rows are not a hedge. `ci.yml` builds them and
-uploads them, and its step summary says so, but no runner in any workflow
-executes one of those binaries. The workload that would prove them needs the
-matching hardware or an emulator. Treat them as untested.
+The four "compile result only" rows are not a hedge, and publishing them did
+not change it. `ci.yml` builds them and uploads them, `release.yml` publishes
+the four Linux ones, and its step summary says which were built — but no runner
+in any workflow executes one of those binaries. The workload that would prove
+them needs the matching hardware or an emulator. Treat them as untested: three
+of the five `.node` files a consumer can now install have never been loaded.
 
 ### `native-loader.cjs` covers more platforms than this package publishes
 
@@ -147,8 +159,9 @@ again after removing both package-lock.json and node_modules directory.
 ```
 
 That is what you get on `darwin-x64`, `win32-x64`, `freebsd-x64` and
-`linux-riscv64` — and the same on `linux-x64` if the platform packages were
-absent, which is the state of the registry today. Two things to know:
+`linux-riscv64` — and the same on `linux-x64` if the platform package is
+absent, which is what every install looked like before `0.0.6`. Two things to
+know:
 
 - The `cause` names the **WASI** package
   (`@oktz-curve25519/curve25519-wasm32-wasi`, the loader's last fallback at
@@ -156,8 +169,9 @@ absent, which is the state of the registry today. Two things to know:
   missing. `error.cause` is a chained summary of every attempt, and the last
   one is the WASI fallback. The platform attempts are in there too.
 - The advice is wrong for this failure mode. It is npm's generic message for
-  "no optional dependency installed"; here no `optionalDependencies` exist on
-  the registry at all, so reinstalling will not help.
+  "no optional dependency installed"; on a host `0.0.6` supports that means
+  the platform package was skipped or removed, not that none of them exist on
+  the registry, so reinstalling without clearing `node_modules` may not help.
 
 ## Usage
 
@@ -185,11 +199,11 @@ console.log('verified, and rejected a one-bit corruption');
 
 Every `js run` block above writes the package specifier a consumer would
 write, and `docs/verify.mjs` rewrites that one specifier to this directory's
-`index.cjs` before running it. The rewrite is load-bearing: the enclosing
-`Onigi` repository has the *published* `oktz-curve25519` in its
-`node_modules`, and without the rewrite each block would exercise that
-linux-x64-only artifact — the one described in the first section — instead of
-the source it claims to document.
+`index.cjs` before running it. The rewrite is load-bearing today: the
+enclosing `Onigi` repository has `oktz-curve25519@0.0.4` in its
+`node_modules` — the single-platform artifact described in the first section —
+so without the rewrite each block would exercise that linux-x64-only tarball
+instead of the source it claims to document.
 
 In a checkout of your own, write the path instead:
 
@@ -227,10 +241,11 @@ Two traps in that table, both covered in
   length` — it does not return `false`. Strip it first.
 - **`generateKeyPair(seed)` ignores `seed`.** It is length-checked and then
   discarded; the keypair is random. The package's own docstring says so
-  (`index.cjs:29-31`: "*diabaikan — Node keygen random*"), and the published
-  `0.0.4` does exactly the same. Use the `private` the call returns. I could
-  not verify what the upstream `curve25519-js` does with that argument from
-  this tree, so treat the parameter name as a shape, not a contract.
+  (`index.cjs:29-31`: "*diabaikan — Node keygen random*"), and `0.0.6` does
+  exactly what the published `0.0.4` did — this is unchanged behaviour across
+  both layouts. Use the `private` the call returns. I could not verify what the
+  upstream `curve25519-js` does with that argument from this tree, so treat the
+  parameter name as a shape, not a contract.
 
 ```js run
 import assert from 'node:assert/strict';
@@ -556,7 +571,7 @@ without anyone noticing, so the gate refuses to guess.
 
 Each block writes the package specifier a consumer would write, and the
 verifier rewrites that one specifier to this directory's `index.cjs` before
-running it — otherwise every block would exercise the *published* package
+running it — otherwise every block would exercise the `oktz-curve25519@0.0.4`
 that the enclosing repository has in `node_modules`, which is the wrong
 artifact.
 
@@ -569,16 +584,19 @@ documentation bug.
 
 ## Known limitations
 
-1. **No published platform packages.** All five 404. See the table at the top.
+1. **Only `linux-x64-gnu` is verified end to end.** `0.0.6` publishes four
+   platform packages, but the other three are compile results that no runner
+   has executed. See the platform matrix above.
 2. **macOS and Windows are unsupported**, by omission rather than by policy —
    there is no target to build.
 3. **The Android binary is never published**, gated on a workflow input that
-   nothing sets.
+   nothing sets. It is also not in `optionalDependencies`, so
+   `npm install` never asks for it.
 4. **`generateKeyPair` is not seeded.** The parameter is named `seed`, is
-   validated as one, and is then thrown away. The published `0.0.4` behaves
-   identically, so this is not a 0.0.4 regression — it is the behaviour that
-   has always shipped here. Ported code that expects the argument to determine
-   the keypair will not get that.
+   validated as one, and is then thrown away. `0.0.6` and the published
+   `0.0.4` behave identically, so this is not a `0.0.6` regression — it is the
+   behaviour that has always shipped here, through both layouts. Ported code
+   that expects the argument to determine the keypair will not get that.
 5. **No TypeScript definitions ship in the tarball.** `index.cjs` is
    CommonJS and untyped; `napi.config.json` has no `types` entry and
    `package.json` has no `types` field. Editors will infer `any`. A `.d.ts`
@@ -594,7 +612,7 @@ documentation bug.
 - [docs/quickstart.md](docs/quickstart.md) — sign, verify, reject
 - [docs/api.md](docs/api.md) — every export, read from source
 - [docs/encoding.md](docs/encoding.md) — the `0x05` prefix, the sign bit, the lengths
-- [CHANGELOG.md](CHANGELOG.md) — what 0.0.4 changed, and what is still wrong
+- [CHANGELOG.md](CHANGELOG.md) — what `0.0.6` changed, and what is still wrong
 - `examples/*.mjs` — the above, as programs
 - [napi-rs]: https://napi.rs/
 

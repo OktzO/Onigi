@@ -1,27 +1,28 @@
 # Changelog
 
 All notable changes to `oktz-curve25519`. This directory is vendored into the
-`Onigi` repository and has its own CI (`.github/workflows/ci.yml` and
-`release.yml`) and its own `napi.config.json`; the commits below are the real
-ones from `git log -- native/curve25519`, and the file lists are the real
-ones in this tree. The seven hashless bullets in the `next` section below are
-the ones in the commits that write this file: a commit cannot contain its own
-hash, so those seven are identified by subject rather than by identifier.
+`Onigi` repository and has its own CI and release workflow
+(`../../.github/workflows/curve25519-release.yml`) and its own
+`napi.config.json`; the commits below are the real ones from
+`git log -- native/curve25519`, and the file lists are the real ones in this
+tree. The seven hashless bullets in the `0.0.6` section below are the ones in
+the commits that write this file: a commit cannot contain its own hash, so
+those seven are identified by subject rather than by identifier.
 
 The Rust crate's own version is `0.1.0` (`Cargo.toml`); the npm package's is
-`0.0.4`. They are independent.
+`0.0.6`. They are independent.
 
 ---
 
-## next — the fixes after 0.0.4, none of them published
+## 0.0.6 — the fixes after 0.0.4, and the first real native binding
 
-**Nothing in this section is on npm, and the version number has not moved.**
-`package.json` still says `0.0.4`, which is the version the registry serves
-today, and that artifact contains none of these fixes. Two of them change
-observable behaviour, so publishing this tree under the existing `0.0.4` would
-ship a signature-nonce change and a verification change as a patch release.
-Whoever publishes this needs a version that is not `0.0.4`. The identifiers
-below are commit hashes, not version numbers.
+`0.0.5` shipped the loader only: its four `@oktz-curve25519/curve25519-*`
+optional dependencies had never been published, so a consumer got no native
+binding at all. `0.0.6` is the first release that actually carries a `.node`,
+and it carries the fixes below with it. The version moved rather than
+republishing `0.0.4`, because two of these change observable behaviour and
+would have shipped as a patch. The identifiers below are commit hashes, not
+version numbers.
 
 - **`fcf1cf9` — `fix(curve): verify XEdDSA with verify_strict, not the
   cofactorless equation`.** `verify` called `ed25519-dalek`'s cofactorless
@@ -461,8 +462,9 @@ below are commit hashes, not version numbers.
 
 ## 0.0.4 — the multi-prebuild loader (2026-09-18)
 
-**The substantive change, and it has never been published.** The npm registry
-still serves the pre-multi-prebuild artifact. See "0.0.4 as published" below
+**The substantive change, and at the time it had never been published** — under
+the `0.0.4` version number, the npm registry served a pre-multi-prebuild
+artifact instead. It first shipped as `0.0.6`. See "0.0.4 as published" below
 for the exact difference.
 
 - **`b5d08d1` — `feat: package curve prebuilds by platform`.** Replaced the
@@ -492,7 +494,7 @@ for the exact difference.
 - **`2356c2d` — `docs: document native platform support`.** Added the
   `engines` field.
 
-### 0.0.4 as published — and why it is not this
+### 0.0.4 as published — and why it was not the tree
 
 Downloaded and read on 2026-09-29:
 
@@ -508,10 +510,13 @@ package/curve25519.linux-x64-gnu.node
 `const native = require('./curve25519.linux-x64-gnu.node');` — one line, no
 branch, no platform detection. `oktz-curve25519@1.0.0` is the same layout.
 
-All five `@oktz-curve25519/curve25519-*` names return `404` from the registry.
-The `optionalDependencies` in this tree therefore cannot resolve for anyone,
-so publishing the main package as-is would produce an install that always
-throws `Cannot find native binding` at `require()` time.
+At the time of that download all five `@oktz-curve25519/curve25519-*` names
+returned `404` from the registry, which is why the loader could not resolve for
+anyone and the main package could not be published as-is without producing an
+install that always throws `Cannot find native binding` at `require()` time.
+`0.0.6` is the release that fixes that: the four Linux platform packages are
+published, and the Android one is still held back behind `termux_test_passed`
+(see Known issues below).
 
 ---
 
@@ -535,7 +540,7 @@ throws `Cannot find native binding` at `require()` time.
 
 Documentation and CI only. No `Cargo.toml`, `npm/**` or `native-loader.cjs`
 change is part of it, and no `src/**` change: the library fixes are the
-`next` section above, and the two are not the same work.
+`0.0.6` section above, and the two are not the same work.
 
 - **`npm test` now works on Node 22.** It was `node --test tests/`, which on
   Node 22.23.3 fails with
@@ -568,16 +573,16 @@ change is part of it, and no `src/**` change: the library fixes are the
 
 Recorded because they are properties of the code and a reader needs them. No
 library source was modified for any of the six below — they are still open
-after the `next` section above.
+after the `0.0.6` section above.
 
-1. **The five platform packages are unpublished.** Every
-   `@oktz-curve25519/curve25519-*` is a `404`. The layout this tree
-   describes cannot work for an installed consumer.
-2. **The version number does not describe the artifact.** `package.json` is
-   still `0.0.4`, and `0.0.4` on npm is a single-prebuild package built before
-   every entry in this file. There is no version under which the fixes above
-   have been released, so a tree-based build and an `npm install` of the same
-   version number are not the same program.
+1. **Only four of the five platform packages are published, and none of them is
+   verified end to end.** The four Linux ones ship at `0.0.6` and resolve;
+   `@oktz-curve25519/curve25519-android-arm64` is still gated behind
+   `termux_test_passed` and is not in `optionalDependencies`. Of the four that
+   ship, only `linux-x64-gnu` has been loaded by any runner.
+2. **The Android package is absent from `optionalDependencies`.** Even once it
+   is published, npm will not ask for it, so a Termux install gets the JS
+   wrapper and no `.node` until that field changes.
 3. **`generateKeyPair(seed)` ignores `seed`.** The parameter is named `seed`,
    is validated as one, and is discarded (`index.cjs:29-31` says so in its own
    docstring). The published `0.0.4` has the identical function, so this is not
@@ -598,7 +603,8 @@ after the `next` section above.
 
 | Version | On npm | In this tree |
 |---|---|---|
-| `0.0.4` | yes — single prebuild, no `optionalDependencies` | the multi-prebuild loader; the fixes above are **not** under this version |
-| `0.0.4-native.1` | yes — a prerelease of the above | — |
-| `1.0.0` | yes — same single-prebuild layout | — |
-| next | **never published** | this tree |
+| `0.0.4` | yes — single prebuild, no `optionalDependencies` | the multi-prebuild loader, but not the fixes above |
+| `0.0.5` | yes — the multi-prebuild loader with four unpublished `optionalDependencies`, so no native binding at all | — |
+| `0.0.4-native.1` | yes — a prerelease of the `0.0.4` artifact | — |
+| `0.0.6` | yes — **this tree**: four Linux platform packages plus this loader, and the fixes above | `package.json` is `0.0.6` |
+| `1.0.0` | yes — the old single-prebuild layout, the same one as `0.0.4` | — |
