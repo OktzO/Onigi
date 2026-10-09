@@ -245,8 +245,18 @@ jobs:
           # it resolved npm/linux-x64-gnu as an unscoped package and tried
           # git@github.com/npm/linux-x64-gnu.git. cd into each directory so
           # npm reads the package.json sitting in it.
+          #
+          # A version that is already on the registry returns 409. Skip those
+          # rather than failing the whole release: a partially published set is
+          # recoverable, a job that dies on the first 409 publishes nothing.
           for d in npm/*/; do
-            (cd "$d" && npm publish --ignore-scripts --provenance --access public)
+            echo "::group::$d"
+            if (cd "$d" && npm publish --ignore-scripts --provenance --access public); then
+              echo "published $d"
+            else
+              echo "::warning::$d was not published; see the error above"
+            fi
+            echo "::endgroup::"
           done
         working-directory: native/curve25519
       - name: Publish main package

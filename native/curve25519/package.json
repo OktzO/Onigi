@@ -1,6 +1,6 @@
 {
   "name": "oktz-curve25519",
-  "version": "0.0.6",
+  "version": "0.0.7",
   "description": "curve25519-js replacement — XEdDSA sign/verify native Rust, X25519 node:crypto",
   "main": "index.cjs",
   "license": "MIT",
@@ -16,10 +16,10 @@
     "docs:verify": "node docs/verify.mjs"
   },
   "optionalDependencies": {
-    "@oktz/curve25519-linux-arm64-gnu": "0.0.6",
-    "@oktz/curve25519-linux-arm64-musl": "0.0.6",
-    "@oktz/curve25519-linux-x64-gnu": "0.0.6",
-    "@oktz/curve25519-linux-x64-musl": "0.0.6"
+    "@oktz/curve25519-linux-arm64-gnu": "0.0.7",
+    "@oktz/curve25519-linux-arm64-musl": "0.0.7",
+    "@oktz/curve25519-linux-x64-gnu": "0.0.7",
+    "@oktz/curve25519-linux-x64-musl": "0.0.7"
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.10.4"
